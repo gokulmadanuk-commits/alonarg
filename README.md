@@ -52,6 +52,22 @@ the system tray, and registers the global hotkey.
 - **Dashboard:** a Record button with a live timer; cards update through
   `recording → transcribing → summarizing → done` on their own.
 
+## Phone companion (PWA)
+
+An installable, offline-first phone app lets you record **in-person** meetings and run them
+through the same pipeline and dashboard. It's live at **https://alonarg.vercel.app** (hosted on
+Vercel; source in `pwa/`).
+
+- Open it on your phone and **Add to Home Screen**. You can record and queue meetings offline.
+- The heavy lifting (transcription + your Claude-plan summary) stays on your PC, so the phone
+  uploads recordings to your PC's engine over a secure tunnel and reads back the same dashboard.
+- One command on the PC sets this up: **`.\connect.ps1`** — see **[CONNECT.md](CONNECT.md)** for
+  the full walkthrough (tunnel + token + PWA settings).
+
+The backend gains `POST /api/upload`, CORS, and an optional bearer token (`ALONARG_TOKEN`) that
+gates `/api/*` and `/audio/*` whenever set. With no token (default) the desktop app behaves
+exactly as before.
+
 ## How it works
 
 ```
