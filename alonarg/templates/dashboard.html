@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alonarg</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Alonarg</h1>
+    </div>
+    <div class="record-controls">
+      <span id="elapsed" class="elapsed" hidden>00:00</span>
+      <button id="record-btn" class="record-btn" type="button" data-state="idle">
+        <span class="record-icon"></span>
+        <span id="record-label">Start recording</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="section-title">Recordings</h2>
+
+    <div id="empty-state" class="empty-state" {% if recordings %}hidden{% endif %}>
+      <p>No recordings yet.</p>
+      <p class="muted">Press <strong>Start recording</strong> to capture your first meeting.</p>
+    </div>
+
+    <ul id="recordings" class="cards">
+      {% for r in recordings %}
+      <li class="card" data-id="{{ r.id }}">
+        <div class="card-main">
+          <a class="card-title" href="/recording/{{ r.id }}">{{ r.title or "Untitled recording" }}</a>
+          <div class="card-meta">
+            <span class="meta-date" data-created="{{ r.created_at }}">{{ r.created_at }}</span>
+            <span class="dot-sep">&middot;</span>
+            <span class="meta-duration" data-duration="{{ r.duration_s or 0 }}">{{ r.duration_s or 0 }}s</span>
+          </div>
+          {% if r.summary and r.summary.summary %}
+          <p class="card-summary">{{ r.summary.summary }}</p>
+          {% endif %}
+          <div class="card-tags">
+            <span class="status-badge status-{{ r.status }}" data-status>{{ r.status }}</span>
+            {% if r.summary and r.summary.action_items %}
+            <span class="action-count">{{ r.summary.action_items | length }} action item{{ "s" if (r.summary.action_items | length) != 1 else "" }}</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-actions">
+          <a class="btn btn-ghost" href="/recording/{{ r.id }}">Open</a>
+          <button class="btn btn-danger delete-btn" type="button" data-id="{{ r.id }}">Delete</button>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </main>
+
+  <script>window.ALONARG_TOKEN={{ token|tojson }};</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

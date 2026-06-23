@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ (rec.title or "Recording") }} &middot; Alonarg</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Alonarg</h1>
+    </div>
+    <a class="btn btn-ghost" href="/">&larr; Back</a>
+  </header>
+
+  <main class="container detail">
+    <h2 class="detail-title">{{ rec.title or "Untitled recording" }}</h2>
+    <div class="card-meta">
+      <span class="meta-date" data-created="{{ rec.created_at }}">{{ rec.created_at }}</span>
+      <span class="dot-sep">&middot;</span>
+      <span class="meta-duration" data-duration="{{ rec.duration_s or 0 }}">{{ rec.duration_s or 0 }}s</span>
+      <span class="dot-sep">&middot;</span>
+      <span class="status-badge status-{{ rec.status }}">{{ rec.status }}</span>
+    </div>
+
+    {% if rec.status != "done" %}
+    <div class="notice">
+      {% if rec.status == "error" %}
+        <strong>Processing failed.</strong>
+        {% if rec.error %}<div class="muted">{{ rec.error }}</div>{% endif %}
+      {% else %}
+        Processing&hellip; ({{ rec.status }})
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if rec.mixed_path %}
+    <section class="player">
+      <audio controls preload="metadata" data-audio-id="{{ rec.id }}" src="/audio/{{ rec.id }}"></audio>
+    </section>
+    {% endif %}
+
+    {% set summary = rec.summary %}
+    <section class="panel">
+      <h3>Summary</h3>
+      {% if summary and summary.summary %}
+        <p class="summary-text">{{ summary.summary }}</p>
+      {% else %}
+        <p class="muted">No summary yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h3>Action items</h3>
+      {% if summary and summary.action_items %}
+        <ul class="bullet-list">
+          {% for item in summary.action_items %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">None.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h3>Next steps</h3>
+      {% if summary and summary.next_steps %}
+        <ul class="bullet-list">
+          {% for item in summary.next_steps %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">None.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <details class="transcript">
+        <summary>Full transcript</summary>
+        {% if rec.transcript and rec.transcript.text %}
+          <pre class="transcript-text">{{ rec.transcript.text }}</pre>
+        {% else %}
+          <p class="muted">No transcript available.</p>
+        {% endif %}
+      </details>
+    </section>
+  </main>
+
+  <script>window.ALONARG_TOKEN={{ token|tojson }};</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

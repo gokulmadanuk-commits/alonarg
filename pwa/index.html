@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1115" />
+  <meta name="description" content="Alonarg — record in-person meetings on your phone, sync to your PC." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Alonarg" />
+  <title>Alonarg</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Alonarg</h1>
+    </div>
+    <button id="conn-pill" class="conn-pill" data-state="unconfigured" type="button" title="Connection status">
+      <span class="conn-dot"></span>
+      <span id="conn-label" class="conn-label">Not set</span>
+    </button>
+  </header>
+
+  <main class="container">
+    <!-- ======================= RECORD ======================= -->
+    <section id="view-record" class="view" data-view="record">
+      <div class="record-stage">
+        <div id="rec-timer" class="rec-timer">00:00</div>
+        <button id="rec-btn" class="rec-fab" type="button" data-state="idle" aria-label="Start recording">
+          <span class="rec-fab-icon"></span>
+        </button>
+        <p id="rec-hint" class="rec-hint muted">Tap to record this meeting</p>
+        <p id="rec-error" class="rec-error" hidden></p>
+      </div>
+      <div id="rec-saved" class="toast" hidden></div>
+    </section>
+
+    <!-- ===================== RECORDINGS ===================== -->
+    <section id="view-recordings" class="view" data-view="recordings" hidden>
+      <div class="list-toolbar">
+        <h2 class="section-title">Recordings</h2>
+        <button id="sync-btn" class="btn btn-accent" type="button">Sync now</button>
+      </div>
+      <div id="sync-status" class="sync-status muted" hidden></div>
+      <ul id="cards" class="cards"></ul>
+      <div id="cards-empty" class="empty-state" hidden>
+        No recordings yet. Tap <strong>Record</strong> to capture your first meeting.
+      </div>
+    </section>
+
+    <!-- ===================== DETAIL ========================= -->
+    <section id="view-detail" class="view view-detail" data-view="detail" hidden>
+      <button id="detail-back" class="btn btn-ghost back-btn" type="button">&larr; Back</button>
+      <div id="detail-body"></div>
+    </section>
+
+    <!-- ===================== SETTINGS ======================= -->
+    <section id="view-settings" class="view" data-view="settings" hidden>
+      <h2 class="section-title">Settings</h2>
+      <form id="settings-form" class="settings-form" autocomplete="off">
+        <label class="field">
+          <span class="field-label">Backend URL (your PC)</span>
+          <input id="cfg-base" class="input" type="url" inputmode="url"
+                 placeholder="http://192.168.1.20:8765" spellcheck="false" />
+          <span class="field-help muted">The address your PC engine is listening on.</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Token (optional)</span>
+          <input id="cfg-token" class="input" type="password" placeholder="Bearer token" spellcheck="false" />
+        </label>
+        <div class="settings-actions">
+          <button id="save-btn" class="btn btn-accent" type="submit">Save</button>
+          <button id="test-btn" class="btn" type="button">Test connection</button>
+        </div>
+        <div id="test-result" class="test-result" hidden></div>
+      </form>
+      <p class="muted app-version">Alonarg phone companion &middot; offline-first PWA</p>
+    </section>
+  </main>
+
+  <!-- ======================= TAB BAR ======================= -->
+  <nav class="tabbar" role="tablist">
+    <button class="tab" data-tab="record" type="button" aria-selected="true">
+      <span class="tab-ico" aria-hidden="true">&#9210;</span>
+      <span class="tab-txt">Record</span>
+    </button>
+    <button class="tab" data-tab="recordings" type="button" aria-selected="false">
+      <span class="tab-ico" aria-hidden="true">&#9776;</span>
+      <span class="tab-txt">Recordings</span>
+    </button>
+    <button class="tab" data-tab="settings" type="button" aria-selected="false">
+      <span class="tab-ico" aria-hidden="true">&#9881;</span>
+      <span class="tab-txt">Settings</span>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>

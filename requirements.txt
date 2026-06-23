@@ -1,0 +1,24 @@
+# Audio capture (WASAPI loopback for system audio + mic) — Windows
+PyAudioWPatch
+numpy
+soundfile
+
+# Local transcription
+faster-whisper
+
+# Backend + dashboard
+fastapi
+uvicorn
+jinja2
+python-multipart
+
+# Tray + global hotkey
+pystray
+pillow
+keyboard
+
+# HTTP client (tray -> server, and test client)
+httpx
+
+# Tests
+pytest
