@@ -206,6 +206,255 @@
     toast("Calendar disconnected");
   }
 
+  // ---- left-nav view switching (recordings / calendar / settings) ------
+  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", settings: "Settings" };
+  function currentView() {
+    const h = (location.hash || "").replace("#", "");
+    return VIEW_TITLES[h] ? h : "recordings";
+  }
+  function showView(name) {
+    document.querySelectorAll(".view[data-view]").forEach((s) => { s.hidden = s.dataset.view !== name; });
+    document.querySelectorAll(".nav-link[data-view]").forEach((a) => { a.classList.toggle("active", a.dataset.view === name); });
+    const t = document.getElementById("view-title");
+    if (t) t.textContent = VIEW_TITLES[name] || "Recordings";
+    // The calendar wants the full width; other views read better narrow.
+    const main = document.querySelector(".content-main");
+    if (main) main.classList.toggle("cal-wide", name === "calendar");
+    if (name === "calendar") loadCalendar();
+    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); }
+  }
+
+  // ---- calendar week view + auto-record toggles -----------------------
+  let _calEvents = {};
+  let _calLastEvents = null; // cached for re-render on resize
+  // Minimum pixels per hour: keeps a 30-min slot tall enough to read its title.
+  const MIN_HOUR_PX = 72;
+  function sameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+  function elc(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
+  function fmtHour(h) {
+    const ampm = h < 12 ? "AM" : "PM";
+    const hr = h % 12 === 0 ? 12 : h % 12;
+    return hr + " " + ampm;
+  }
+  function fmtTimeRange(ev) {
+    const s = new Date(ev.start), e = new Date(ev.end);
+    const opt = { hour: "2-digit", minute: "2-digit" };
+    const ss = isNaN(s.getTime()) ? "" : s.toLocaleTimeString(undefined, opt);
+    const ee = isNaN(e.getTime()) ? "" : e.toLocaleTimeString(undefined, opt);
+    return ss + (ee ? " – " + ee : "");
+  }
+  async function loadCalendar() {
+    const body = document.getElementById("calendar-body");
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading your calendar…</p>';
+    const { ok, body: data } = await jsonFetch("/api/calendar/events?days=7");
+    if (!ok || !data) {
+      body.innerHTML = '<p class="ask-answer error">Could not load the calendar. Make sure the engine is running.</p>';
+      return;
+    }
+    if (!data.connected) {
+      body.innerHTML =
+        '<div class="empty-state"><p>Calendar not connected.</p>' +
+        '<p class="muted">Connect it in <a href="/#settings">Settings</a> to see your meetings here and have Alonarg auto-record them.</p></div>';
+      return;
+    }
+    renderCalendar(data.events || []);
+  }
+  // Assign overlapping events to side-by-side columns (Outlook-style).
+  // Each event gets .lane (0-based) and .cols (columns in its overlap cluster).
+  function packDay(items) {
+    items.sort((a, b) => a.sMin - b.sMin || a.eMin - b.eMin);
+    let group = [], groupEnd = -Infinity;
+    const flush = () => {
+      const laneEnds = [];
+      group.forEach((it) => {
+        let i = 0;
+        for (; i < laneEnds.length; i++) { if (it.sMin >= laneEnds[i]) break; }
+        laneEnds[i] = it.eMin; it.lane = i;
+      });
+      group.forEach((it) => { it.cols = laneEnds.length; });
+      group = [];
+    };
+    items.forEach((it) => {
+      if (group.length && it.sMin >= groupEnd) { flush(); groupEnd = -Infinity; }
+      group.push(it); groupEnd = Math.max(groupEnd, it.eMin);
+    });
+    flush();
+  }
+
+  function renderCalendar(events) {
+    const body = document.getElementById("calendar-body");
+    _calEvents = {};
+    _calLastEvents = events;
+    closePopover();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(today); d.setDate(today.getDate() + i); days.push(d); }
+
+    // Parse events into day buckets with minute offsets.
+    const byDay = Array.from({ length: 7 }, () => []);
+    let minHour = 8, maxHour = 18;
+    events.forEach((ev) => {
+      _calEvents[ev.key] = ev;
+      const s = new Date(ev.start);
+      if (isNaN(s.getTime())) return;
+      let e = new Date(ev.end);
+      if (isNaN(e.getTime()) || e <= s) e = new Date(s.getTime() + 30 * 60000);
+      const di = days.findIndex((d) => sameDay(d, s));
+      if (di < 0) return;
+      let sMin = s.getHours() * 60 + s.getMinutes();
+      let eMin = e.getHours() * 60 + e.getMinutes();
+      if (!sameDay(s, e) || eMin <= sMin) eMin = 24 * 60; // clamp multi-day to end of day
+      byDay[di].push({ ev: ev, sMin: sMin, eMin: eMin });
+      minHour = Math.min(minHour, Math.floor(sMin / 60));
+      maxHour = Math.max(maxHour, Math.ceil(eMin / 60));
+    });
+    const startHour = Math.max(0, minHour);
+    const endHour = Math.min(24, Math.max(maxHour, startHour + 1));
+    const totalHours = endHour - startHour;
+    // Stretch the grid to fill the viewport height; never go below MIN_HOUR_PX
+    // (so a 30-min meeting still shows its title). Scrolls if the day is long.
+    const avail = Math.max(360, Math.floor(window.innerHeight - body.getBoundingClientRect().top - 24));
+    const hourPx = Math.max(MIN_HOUR_PX, avail / totalHours);
+    const totalPx = hourPx * totalHours;
+
+    const grid = elc("div", "cal-grid");
+    grid.appendChild(elc("div", "cal-corner"));
+    days.forEach((d, idx) => {
+      const h = elc("div", "cal-colhead" + (idx === 0 ? " today" : ""));
+      h.innerHTML =
+        '<span class="cal-dow">' + d.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase() + "</span>" +
+        '<span class="cal-dnum">' + (idx === 0 ? "Today" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" })) + "</span>";
+      grid.appendChild(h);
+    });
+
+    const gutter = elc("div", "cal-gutter"); gutter.style.height = totalPx + "px";
+    for (let hr = startHour; hr < endHour; hr++) {
+      const lbl = elc("div", "cal-hourlabel");
+      lbl.style.top = (hr - startHour) * hourPx + "px";
+      lbl.textContent = fmtHour(hr);
+      gutter.appendChild(lbl);
+    }
+    grid.appendChild(gutter);
+
+    days.forEach((d, idx) => {
+      const col = elc("div", "cal-daycol" + (idx === 0 ? " today" : ""));
+      col.style.height = totalPx + "px";
+      col.style.backgroundSize = "100% " + hourPx + "px";
+      packDay(byDay[idx]);
+      byDay[idx].forEach((it) => col.appendChild(eventBlock(it, startHour, hourPx)));
+      if (idx === 0) addNowLine(col, startHour, endHour, hourPx);
+      grid.appendChild(col);
+    });
+
+    const week = elc("div", "cal-week");
+    week.style.height = Math.min(avail, totalPx) + "px";
+    week.appendChild(grid);
+    body.innerHTML = "";
+    body.appendChild(week);
+  }
+
+  function eventBlock(it, startHour, hourPx) {
+    const ev = it.ev;
+    const cols = it.cols || 1, lane = it.lane || 0;
+    const top = (it.sMin - startHour * 60) / 60 * hourPx;
+    const height = Math.max(20, (it.eMin - it.sMin) / 60 * hourPx);
+    const el = elc("div", "cal-ev" + (ev.auto_record ? " armed" : ""));
+    el.dataset.key = ev.key;
+    el.style.top = top + "px";
+    el.style.height = (height - 2) + "px";
+    el.style.left = "calc(" + (lane / cols * 100) + "% + 2px)";
+    el.style.width = "calc(" + (100 / cols) + "% - 4px)";
+    el.title = ev.subject || "";
+    el.innerHTML =
+      '<span class="cal-ev-time">' + esc(fmtTimeRange(ev)) + "</span>" +
+      '<span class="cal-ev-title">' + esc(ev.subject || "(no title)") + "</span>";
+    el.addEventListener("click", (e) => { e.stopPropagation(); openEventPopover(ev, el); });
+    return el;
+  }
+
+  function addNowLine(col, startHour, endHour, hourPx) {
+    const now = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    if (mins < startHour * 60 || mins > endHour * 60) return;
+    const line = elc("div", "cal-now");
+    line.style.top = (mins - startHour * 60) / 60 * hourPx + "px";
+    col.appendChild(line);
+  }
+
+  // ---- event popover (peek + auto-record toggle) ----------------------
+  let _popEl = null;
+  function closePopover() {
+    if (_popEl) { _popEl.remove(); _popEl = null; document.removeEventListener("click", _popOutside); }
+  }
+  function _popOutside(e) { if (_popEl && !_popEl.contains(e.target)) closePopover(); }
+  function openEventPopover(ev, anchor) {
+    closePopover();
+    const pop = elc("div", "cal-pop");
+    const n = (ev.attendees || []).length;
+    pop.innerHTML =
+      '<div class="cal-pop-title">' + esc(ev.subject || "(no title)") + "</div>" +
+      '<div class="cal-pop-time muted">' + esc(fmtTimeRange(ev)) + "</div>" +
+      (n ? '<div class="cal-pop-att muted">' + n + " attendee" + (n !== 1 ? "s" : "") + "</div>" : "") +
+      '<label class="cal-pop-arm"><span class="switch"><input type="checkbox"' + (ev.auto_record ? " checked" : "") +
+      '><span class="slider"></span></span><span>Auto-record this meeting</span></label>';
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect();
+    const W = 256;
+    let left = window.scrollX + r.right + 8;
+    if (left + W > window.scrollX + document.documentElement.clientWidth - 8) {
+      left = window.scrollX + r.left - W - 8;
+    }
+    if (left < window.scrollX + 8) left = window.scrollX + 8;
+    pop.style.left = left + "px";
+    pop.style.top = (window.scrollY + Math.max(8, r.top)) + "px";
+    const cb = pop.querySelector("input");
+    cb.addEventListener("change", () => toggleAutoRecord(ev, cb, anchor));
+    setTimeout(() => document.addEventListener("click", _popOutside), 0);
+    _popEl = pop;
+  }
+
+  async function toggleAutoRecord(ev, cb, blockEl) {
+    const enabled = cb.checked;
+    cb.disabled = true;
+    const { ok, body } = await jsonFetch("/api/calendar/autorecord", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: ev, enabled: enabled }),
+    });
+    cb.disabled = false;
+    if (ok && body) {
+      ev.auto_record = enabled;
+      if (blockEl) blockEl.classList.toggle("armed", enabled);
+      toast(enabled ? "Will auto-record this meeting" : "Auto-record turned off");
+    } else {
+      cb.checked = !enabled;
+      toast("Could not update auto-record");
+    }
+  }
+
+  // ---- settings: engine/storage info + push test ----------------------
+  async function loadSystemInfo() {
+    const el = document.getElementById("sys-info");
+    if (!el) return;
+    const { ok, body } = await jsonFetch("/api/system/info");
+    if (!ok || !body) { el.innerHTML = '<p class="muted">Could not load engine info.</p>'; return; }
+    const cal = body.calendar_connected
+      ? (body.calendar_source === "graph" ? "Microsoft Graph" : "Outlook desktop")
+      : "Not connected";
+    const rows = [
+      ["Recordings", body.recordings_count],
+      ["Summary model", body.model],
+      ["Transcription", "Whisper " + body.whisper_model],
+      ["Calendar", cal],
+      ["Auto-record meetings", body.auto_record_count],
+      ["Data folder", body.data_dir],
+    ];
+    el.innerHTML = rows.map((r) => "<dt>" + esc(r[0]) + "</dt><dd>" + esc(String(r[1])) + "</dd>").join("");
+  }
+
   // ---- recordings list polling (status badges in place) ---------------
   function anyActive() {
     return Array.from(document.querySelectorAll(".card [data-status]"))
@@ -682,6 +931,17 @@
   const calDisconnect = document.getElementById("cal-disconnect");
   if (calDisconnect) calDisconnect.addEventListener("click", disconnectCalendar);
 
+  // settings: send test push
+  const pushTestBtn = document.getElementById("push-test");
+  if (pushTestBtn) pushTestBtn.addEventListener("click", async () => {
+    pushTestBtn.disabled = true;
+    const { ok, body } = await jsonFetch("/api/push/test", { method: "POST" });
+    pushTestBtn.disabled = false;
+    if (ok && body && body.sent > 0) toast("Test notification sent");
+    else if (ok && body && !body.total) toast("No phone subscribed yet — enable nudges in the PWA");
+    else toast("Could not send the test notification");
+  });
+
   // ask across all meetings (dashboard)
   const gAskBtn = document.getElementById("global-ask-btn");
   const gAskInput = document.getElementById("global-ask-input");
@@ -729,13 +989,23 @@
   formatStaticCells(document);
   authenticateAudio(document);
 
-  // Only the dashboard has the record button / cards list.
+  // Only the dashboard has the record button / cards list / views.
   if (recordBtn || document.getElementById("recordings")) {
     pollStatus();
     setInterval(pollStatus, STATUS_POLL_MS);
     if (anyActive()) startListPolling();
     pollNudge();
     setInterval(pollNudge, 20000);
-    refreshCalStatus();
+
+    // left-nav views: switch on hash change, show the current one on load
+    if (document.querySelector(".view[data-view]")) {
+      window.addEventListener("hashchange", () => showView(currentView()));
+      showView(currentView());
+      // re-fit the calendar grid to the window when it resizes
+      window.addEventListener("resize", debounce(() => {
+        const cal = document.querySelector('.view[data-view="calendar"]');
+        if (cal && !cal.hidden && _calLastEvents) renderCalendar(_calLastEvents);
+      }, 200));
+    }
   }
 })();

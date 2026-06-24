@@ -8,15 +8,15 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      <h1>Alonarg</h1>
-    </div>
-    <a class="btn btn-ghost" href="/">&larr; Back</a>
-  </header>
+  <div class="app">
+    {% include "_sidebar.html" %}
 
-  <main class="container detail" data-rec-id="{{ rec.id }}">
+    <div class="content">
+      <header class="content-header">
+        <a class="btn btn-ghost" href="/#recordings">&larr; All recordings</a>
+      </header>
+
+      <main class="content-main detail" data-rec-id="{{ rec.id }}">
     <div class="title-row">
       <h2 class="detail-title" id="detail-title" data-id="{{ rec.id }}">{{ rec.title or "Untitled recording" }}</h2>
       <button class="btn btn-ghost edit-title-btn" type="button" title="Rename meeting">Edit title</button>
@@ -148,7 +148,9 @@
         </section>
       </aside>
     </div>
-  </main>
+      </main>
+    </div>
+  </div>
 
   <script>
     window.ALONARG_TOKEN = {{ token|tojson }};

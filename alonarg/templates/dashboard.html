@@ -8,89 +8,117 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      <h1>Alonarg</h1>
-    </div>
-    <div class="record-controls">
-      <span id="elapsed" class="elapsed" hidden>00:00</span>
-      <button id="record-btn" class="record-btn" type="button" data-state="idle">
-        <span class="record-icon"></span>
-        <span id="record-label">Start recording</span>
-      </button>
-    </div>
-  </header>
+  <div class="app">
+    {% include "_sidebar.html" %}
 
-  <main class="container">
-    <div id="nudge-banner" class="nudge-banner" hidden>
-      <span class="nudge-text" id="nudge-text"></span>
-      <span class="nudge-actions">
-        <button id="nudge-record" class="btn btn-accent" type="button">Record</button>
-        <button id="nudge-dismiss" class="btn btn-ghost" type="button">Dismiss</button>
-      </span>
-    </div>
+    <div class="content">
+      <header class="content-header">
+        <h2 class="view-title" id="view-title">Recordings</h2>
+        <div class="record-controls">
+          <span id="elapsed" class="elapsed" hidden>00:00</span>
+          <button id="record-btn" class="record-btn" type="button" data-state="idle">
+            <span class="record-icon"></span>
+            <span id="record-label">Start recording</span>
+          </button>
+        </div>
+      </header>
 
-    <section class="panel ask-panel">
-      <h3>Ask your meetings</h3>
-      <div class="ask-row">
-        <input id="global-ask-input" class="ask-input" type="text" placeholder="Ask across all meetings — e.g. “how many have no action items?”" />
-        <button id="global-ask-btn" class="btn btn-accent" type="button">Ask</button>
-      </div>
-      <div id="global-ask-answer" class="ask-answer" hidden></div>
-    </section>
+      <main class="content-main">
+        <div id="nudge-banner" class="nudge-banner" hidden>
+          <span class="nudge-text" id="nudge-text"></span>
+          <span class="nudge-actions">
+            <button id="nudge-record" class="btn btn-accent" type="button">Record</button>
+            <button id="nudge-dismiss" class="btn btn-ghost" type="button">Dismiss</button>
+          </span>
+        </div>
 
-    <div class="list-toolbar">
-      <h2 class="section-title">Recordings</h2>
-      <input id="search-input" class="search-input" type="search" placeholder="Search meetings…" />
-    </div>
+        <!-- ===== Recordings ===== -->
+        <section class="view" data-view="recordings">
+          <section class="panel ask-panel">
+            <h3>Ask your meetings</h3>
+            <div class="ask-row">
+              <input id="global-ask-input" class="ask-input" type="text" placeholder="Ask across all meetings — e.g. “how many have no action items?”" />
+              <button id="global-ask-btn" class="btn btn-accent" type="button">Ask</button>
+            </div>
+            <div id="global-ask-answer" class="ask-answer" hidden></div>
+          </section>
 
-    <div id="empty-state" class="empty-state" {% if recordings %}hidden{% endif %}>
-      <p>No recordings yet.</p>
-      <p class="muted">Press <strong>Start recording</strong> to capture your first meeting.</p>
-    </div>
-
-    <ul id="recordings" class="cards">
-      {% for r in recordings %}
-      <li class="card" data-id="{{ r.id }}" data-href="/recording/{{ r.id }}">
-        <div class="card-main">
-          <a class="card-title" href="/recording/{{ r.id }}">{{ r.title or "Untitled recording" }}</a>
-          <div class="card-meta">
-            <span class="meta-date" data-created="{{ r.created_at }}">{{ r.created_at }}</span>
-            <span class="dot-sep">&middot;</span>
-            <span class="meta-duration" data-duration="{{ r.duration_s or 0 }}">{{ r.duration_s or 0 }}s</span>
+          <div class="list-toolbar">
+            <h3 class="section-title">Recordings</h3>
+            <input id="search-input" class="search-input" type="search" placeholder="Search meetings…" />
           </div>
-          {% if r.summary and r.summary.summary %}
-          <p class="card-summary">{{ r.summary.summary }}</p>
-          {% endif %}
-          <div class="card-tags">
-            <span class="status-badge status-{{ r.status }}" data-status>{{ r.status }}</span>
-            {% if r.summary and r.summary.action_items %}
-            <span class="action-count">{{ r.summary.action_items | length }} action item{{ "s" if (r.summary.action_items | length) != 1 else "" }}</span>
-            {% endif %}
-          </div>
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-danger delete-btn" type="button" data-id="{{ r.id }}">Delete</button>
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
 
-    <section class="panel calendar-panel">
-      <div class="cal-row">
-        <div>
-          <strong>Calendar</strong>
-          <div id="cal-status" class="muted">Checking…</div>
-        </div>
-        <div class="cal-actions">
-          <button id="cal-connect" class="btn btn-accent" type="button" hidden>Connect Outlook calendar</button>
-          <button id="cal-disconnect" class="btn btn-ghost" type="button" hidden>Disconnect</button>
-        </div>
-      </div>
-      <div id="cal-login" class="cal-login" hidden></div>
-    </section>
-  </main>
+          <div id="empty-state" class="empty-state" {% if recordings %}hidden{% endif %}>
+            <p>No recordings yet.</p>
+            <p class="muted">Press <strong>Start recording</strong> to capture your first meeting.</p>
+          </div>
+
+          <ul id="recordings" class="cards">
+            {% for r in recordings %}
+            <li class="card" data-id="{{ r.id }}" data-href="/recording/{{ r.id }}">
+              <div class="card-main">
+                <a class="card-title" href="/recording/{{ r.id }}">{{ r.title or "Untitled recording" }}</a>
+                <div class="card-meta">
+                  <span class="meta-date" data-created="{{ r.created_at }}">{{ r.created_at }}</span>
+                  <span class="dot-sep">&middot;</span>
+                  <span class="meta-duration" data-duration="{{ r.duration_s or 0 }}">{{ r.duration_s or 0 }}s</span>
+                </div>
+                {% if r.summary and r.summary.summary %}
+                <p class="card-summary">{{ r.summary.summary }}</p>
+                {% endif %}
+                <div class="card-tags">
+                  <span class="status-badge status-{{ r.status }}" data-status>{{ r.status }}</span>
+                  {% if r.summary and r.summary.action_items %}
+                  <span class="action-count">{{ r.summary.action_items | length }} action item{{ "s" if (r.summary.action_items | length) != 1 else "" }}</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="card-actions">
+                <button class="btn btn-danger delete-btn" type="button" data-id="{{ r.id }}">Delete</button>
+              </div>
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+
+        <!-- ===== Calendar ===== -->
+        <section class="view" data-view="calendar" hidden>
+          <p class="view-sub muted">Pre-approve meetings and Alonarg will start &amp; stop the recording for you. Everything else just gets a gentle nudge.</p>
+          <div id="calendar-body">
+            <p class="muted">Loading your calendar…</p>
+          </div>
+        </section>
+
+        <!-- ===== Settings ===== -->
+        <section class="view" data-view="settings" hidden>
+          <section class="panel calendar-panel">
+            <div class="cal-row">
+              <div>
+                <strong>Calendar</strong>
+                <div id="cal-status" class="muted">Checking…</div>
+              </div>
+              <div class="cal-actions">
+                <button id="cal-connect" class="btn btn-accent" type="button" hidden>Connect Outlook calendar</button>
+                <button id="cal-disconnect" class="btn btn-ghost" type="button" hidden>Disconnect</button>
+              </div>
+            </div>
+            <div id="cal-login" class="cal-login" hidden></div>
+          </section>
+
+          <section class="panel">
+            <h3>Notifications</h3>
+            <p class="muted">Meeting nudges are delivered to your phone through the Alonarg PWA. Enable them in the phone app, then send a test here.</p>
+            <button id="push-test" class="btn" type="button">Send test notification</button>
+          </section>
+
+          <section class="panel">
+            <h3>Storage &amp; engine</h3>
+            <dl id="sys-info" class="sys-info"><p class="muted">Loading…</p></dl>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <script>window.ALONARG_TOKEN={{ token|tojson }};</script>
   <script src="/static/app.js"></script>

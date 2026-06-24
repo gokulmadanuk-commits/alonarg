@@ -43,6 +43,29 @@ def find_current_event(window_minutes: int = 2) -> dict | None:
     return outlook.find_current_event(window_minutes)
 
 
+def upcoming_events(days: int = 7) -> list[dict]:
+    """Events from now through ``days`` ahead, from the active source.
+
+    Declined and all-day events are dropped (you don't auto-record those), and
+    the result is sorted by start time. Raises ``RuntimeError`` if the active
+    source isn't available (e.g. classic Outlook not running).
+    """
+    now = datetime.now().astimezone()
+    end = now + timedelta(days=days)
+    if msgraph.is_signed_in():
+        events = msgraph.read_events_window(now, end)
+    else:
+        lo = now.strftime("%m/%d/%Y %I:%M %p")
+        hi = end.strftime("%m/%d/%Y %I:%M %p")
+        events = outlook.read_events_window(lo, hi)
+    out = [
+        ev for ev in events
+        if not ev.get("allDay") and ev.get("response") != _DECLINED
+    ]
+    out.sort(key=lambda ev: ev.get("start", ""))
+    return out
+
+
 def find_event_for(created_at_iso: str, window_minutes: int = 90) -> dict | None:
     """The calendar event matching a recording's start time, from the active source."""
     if msgraph.is_signed_in():
