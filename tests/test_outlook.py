@@ -17,13 +17,23 @@ def test_pick_event_contains():
     assert outlook.pick_event(events, when)["subject"] == "B"
 
 
-def test_pick_event_nearest_when_no_overlap():
+def test_pick_event_nearest_within_tolerance():
     events = [
         {"subject": "A", "start": "2026-06-24T09:00:00+00:00", "end": "2026-06-24T09:30:00+00:00"},
-        {"subject": "B", "start": "2026-06-24T12:00:00+00:00", "end": "2026-06-24T13:00:00+00:00"},
+        {"subject": "B", "start": "2026-06-24T10:00:00+00:00", "end": "2026-06-24T11:00:00+00:00"},
     ]
-    when = datetime(2026, 6, 24, 9, 40, tzinfo=timezone.utc)
-    assert outlook.pick_event(events, when)["subject"] == "A"
+    # 9:50 -> not inside either; B starts in 10 min (within tolerance) -> match B.
+    when = datetime(2026, 6, 24, 9, 50, tzinfo=timezone.utc)
+    assert outlook.pick_event(events, when)["subject"] == "B"
+
+
+def test_pick_event_far_returns_none():
+    events = [
+        {"subject": "A", "start": "2026-06-24T09:00:00+00:00", "end": "2026-06-24T09:30:00+00:00"},
+    ]
+    # 9:50 is 50 min after A's start and not inside it -> beyond the 25 min fallback.
+    when = datetime(2026, 6, 24, 9, 50, tzinfo=timezone.utc)
+    assert outlook.pick_event(events, when) is None
 
 
 def test_pick_event_empty():

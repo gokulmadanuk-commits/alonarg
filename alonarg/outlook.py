@@ -79,8 +79,14 @@ def _parse_dt(s: str) -> datetime | None:
         return None
 
 
-def pick_event(events: list[dict], when: datetime) -> dict | None:
-    """Pure: pick the event whose [start, end] contains ``when``, else nearest start."""
+def pick_event(events: list[dict], when: datetime, nearest_tolerance_s: int = 1500) -> dict | None:
+    """Pure: pick the event whose [start, end] contains ``when``.
+
+    Containment always wins (handles back-to-back meetings: you match the one you
+    are actually in). Otherwise fall back to the nearest event *start* — but only
+    if it's within ``nearest_tolerance_s`` (default 25 min), so a far-away meeting
+    is never matched. Returns None if nothing is close enough.
+    """
     best = None
     best_delta = None
     for ev in events:
@@ -93,7 +99,9 @@ def pick_event(events: list[dict], when: datetime) -> dict | None:
         delta = abs((start - when).total_seconds())
         if best_delta is None or delta < best_delta:
             best, best_delta = ev, delta
-    return best
+    if best is not None and best_delta is not None and best_delta <= nearest_tolerance_s:
+        return best
+    return None
 
 
 def find_event_for(created_at_iso: str, window_minutes: int = 90) -> dict | None:
