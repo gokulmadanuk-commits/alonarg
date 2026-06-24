@@ -70,6 +70,13 @@ def main() -> None:
     else:
         log.warning("Server did not respond in time; continuing anyway.")
 
+    # Meeting nudges (web push + dashboard-banner state).
+    try:
+        from alonarg import server as _server
+        _server.start_nudge_scheduler(_server.app)
+    except Exception:  # noqa: BLE001
+        log.warning("Could not start nudge scheduler", exc_info=True)
+
     controller = tray.AppController()
 
     tray.register_hotkey(controller)

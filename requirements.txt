@@ -20,5 +20,8 @@ keyboard
 # HTTP client (tray -> server, and test client)
 httpx
 
+# Web Push (meeting nudges to the phone PWA)
+pywebpush
+
 # Tests
 pytest

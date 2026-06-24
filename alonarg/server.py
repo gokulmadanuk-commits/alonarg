@@ -16,6 +16,7 @@ import logging
 import mimetypes
 import shutil
 import threading
+import time
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, UploadFile
@@ -25,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from alonarg import assistant, audio_capture, config, ingest, outlook, pipeline
+from alonarg import assistant, audio_capture, config, ingest, outlook, pipeline, push
 from alonarg.db import Database
 from alonarg.types import SummaryResult
 
@@ -247,6 +248,7 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     app.state.run_pipeline = run_pipeline
     app.state.run_ingest = run_ingest
     app.state.current_id = None
+    app.state.live_meeting = None
 
     # Allow the phone PWA (a different origin) to call the API. Bearer-token
     # auth means we never use cookies/credentials.
@@ -537,6 +539,31 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             raise HTTPException(status_code=503, detail=str(exc))
         return draft
 
+    # -- meeting nudges + web push ---------------------------------------
+    @app.get("/api/nudge/status", dependencies=[Depends(require_auth)])
+    def nudge_status():
+        recording = getattr(recorder, "is_recording", False)
+        live = app.state.live_meeting
+        return {"recording": recording, "live_meeting": live, "nudgeable": bool(live) and not recording}
+
+    @app.get("/api/push/key", dependencies=[Depends(require_auth)])
+    def push_key():
+        return {"key": push.public_key()}
+
+    @app.post("/api/push/subscribe", dependencies=[Depends(require_auth)])
+    def push_subscribe(subscription: dict = Body(...)):
+        push.add_subscription(subscription)
+        return {"ok": True}
+
+    @app.post("/api/push/unsubscribe", dependencies=[Depends(require_auth)])
+    def push_unsubscribe(endpoint: str = Body(..., embed=True)):
+        push.remove_subscription(endpoint)
+        return {"ok": True}
+
+    @app.post("/api/push/test", dependencies=[Depends(require_auth)])
+    def push_test():
+        return push.send_to_all("Alonarg", "Test nudge — this is how meeting reminders look.", "/")
+
     # -- audio playback ---------------------------------------------------
     @app.get("/audio/{rec_id}", dependencies=[Depends(require_auth)])
     def audio(rec_id: int):
@@ -550,6 +577,46 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         return FileResponse(mixed_path, media_type="audio/wav")
 
     return app
+
+
+def start_nudge_scheduler(app) -> threading.Thread:
+    """Background loop: nudge (web push) when a meeting is live and not recording.
+
+    Polls Outlook every ``config.NUDGE_POLL_SECONDS``, updates
+    ``app.state.live_meeting`` for the dashboard banner, and sends one push per
+    meeting if the user hasn't started recording. Failures are swallowed so the
+    loop never dies.
+    """
+    def _loop():
+        nudged: set = set()
+        while True:
+            try:
+                event = outlook.find_current_event()
+            except Exception:  # noqa: BLE001
+                event = None
+            app.state.live_meeting = (
+                {"subject": event.get("subject", ""), "start": event.get("start", ""),
+                 "end": event.get("end", "")}
+                if event else None
+            )
+            recording = getattr(app.state.recorder, "is_recording", False)
+            if event and not recording:
+                key = (event.get("subject", ""), event.get("start", ""))
+                if key not in nudged:
+                    nudged.add(key)
+                    try:
+                        push.send_to_all(
+                            "Record this meeting?",
+                            f"“{event.get('subject', 'Meeting')}” is in progress. Open Alonarg to record.",
+                            "/",
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.warning("nudge push failed", exc_info=True)
+            time.sleep(max(15, config.NUDGE_POLL_SECONDS))
+
+    thread = threading.Thread(target=_loop, daemon=True, name="alonarg-nudge")
+    thread.start()
+    return thread
 
 
 # Module-level app so ``uvicorn alonarg.server:app`` works.

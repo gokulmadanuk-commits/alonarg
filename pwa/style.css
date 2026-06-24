@@ -306,3 +306,13 @@ body {
 .tab[aria-selected="true"] { color: var(--accent); }
 .tab-ico { font-size: 20px; line-height: 1; }
 .tab-txt { letter-spacing: 0.2px; }
+
+/* ---------------- record on laptop + nudges ---------------- */
+.laptop-rec { margin: 22px auto 0; max-width: 320px; text-align: center; }
+.btn-laptop { width: 100%; }
+.btn-laptop[data-state="recording"] { background: var(--record); border-color: var(--record); color: #fff; }
+.laptop-hint { font-size: 12px; margin: 8px 0 0; }
+.nudge-settings {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
+}

@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const CACHE = 'alonarg-shell-v3';
+const CACHE = 'alonarg-shell-v4';
 
 const SHELL = [
   './',
@@ -36,6 +36,40 @@ self.addEventListener('activate', (event) => {
         Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
       )
       .then(() => self.clients.claim())
+  );
+});
+
+/* Meeting nudge: show the push notification. */
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (_) {
+    payload = { title: 'Alonarg', body: event.data ? event.data.text() : '' };
+  }
+  const title = payload.title || 'Alonarg';
+  const options = {
+    body: payload.body || '',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    data: { url: payload.url || './' },
+    tag: 'alonarg-nudge',
+    renotify: true,
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+/* Tapping the nudge focuses (or opens) the app. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const c of clients) {
+        if ('focus' in c) return c.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
   );
 });
 

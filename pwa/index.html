@@ -38,6 +38,10 @@
         <p id="rec-hint" class="rec-hint muted">Tap to record this meeting</p>
         <p id="rec-error" class="rec-error" hidden></p>
       </div>
+      <div class="laptop-rec" id="laptop-rec" hidden>
+        <button id="laptop-rec-btn" class="btn btn-laptop" type="button" data-state="idle">Record on laptop</button>
+        <p class="muted laptop-hint">Captures your laptop's mic + system audio — for online meetings you're in on the laptop.</p>
+      </div>
       <div id="rec-saved" class="toast" hidden></div>
     </section>
 
@@ -80,6 +84,15 @@
         </div>
         <div id="test-result" class="test-result" hidden></div>
       </form>
+      <div class="field nudge-settings">
+        <span class="field-label">Meeting nudges</span>
+        <span class="field-help muted">Get a phone notification when a meeting starts and you haven't started recording.</span>
+        <div class="settings-actions">
+          <button id="nudge-enable-btn" class="btn btn-accent" type="button">Enable on this device</button>
+          <button id="nudge-test-btn" class="btn" type="button">Send test</button>
+        </div>
+        <div id="nudge-result" class="test-result" hidden></div>
+      </div>
       <p class="muted app-version">Alonarg phone companion &middot; offline-first PWA</p>
     </section>
   </main>

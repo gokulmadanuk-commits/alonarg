@@ -253,3 +253,34 @@ def test_sync_calendar_404(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     assert client.post("/api/recordings/999999/sync-calendar").status_code == 404
     db.close()
+
+
+def test_nudge_status(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.get("/api/nudge/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) >= {"recording", "live_meeting", "nudgeable"}
+    assert body["live_meeting"] is None and body["nudgeable"] is False
+    db.close()
+
+
+def test_push_key(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import push
+    monkeypatch.setattr(push, "public_key", lambda: "PUBKEY")
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    assert client.get("/api/push/key").json() == {"key": "PUBKEY"}
+    db.close()
+
+
+def test_push_subscribe_and_test(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import push
+    added = {}
+    monkeypatch.setattr(push, "add_subscription", lambda s: added.update(s))
+    monkeypatch.setattr(push, "send_to_all", lambda *a, **k: {"sent": 1, "removed": 0})
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.post("/api/push/subscribe", json={"endpoint": "https://x/1", "keys": {"p256dh": "a", "auth": "b"}})
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert added["endpoint"] == "https://x/1"
+    assert client.post("/api/push/test").json() == {"sent": 1, "removed": 0}
+    db.close()

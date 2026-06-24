@@ -38,12 +38,16 @@ foreach ($it in $res) {
       $att += [pscustomobject]@{ name = [string]$r.Name; email = $addr }
     }
   } catch {}
+  $allday = $false; try { $allday = [bool]$it.AllDayEvent } catch {}
+  $resp = 0; try { $resp = [int]$it.ResponseStatus } catch {}
   $out += [pscustomobject]@{
     subject   = [string]$it.Subject
     start     = $it.Start.ToString('o')
     end       = $it.End.ToString('o')
     organizer = [string]$it.Organizer
     attendees = $att
+    allDay    = $allday
+    response  = $resp
   }
 }
 ConvertTo-Json -InputObject @($out) -Depth 6
@@ -113,3 +117,28 @@ def find_event_for(created_at_iso: str, window_minutes: int = 90) -> dict | None
     lo = (when_local - timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
     hi = (when_local + timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
     return pick_event(read_events_window(lo, hi), when_local)
+
+
+# Outlook ResponseStatus value for a declined meeting (olResponseDeclined).
+_DECLINED = 4
+
+
+def find_current_event(window_minutes: int = 2) -> dict | None:
+    """Return the meeting happening *right now*, or None.
+
+    Skips all-day events and meetings the user has declined. Used by the nudge
+    scheduler to decide whether to prompt the user to record.
+    """
+    now = datetime.now().astimezone()
+    lo = (now - timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
+    hi = (now + timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
+    for ev in read_events_window(lo, hi):
+        if ev.get("allDay"):
+            continue
+        if ev.get("response") == _DECLINED:
+            continue
+        start = _parse_dt(ev.get("start", ""))
+        end = _parse_dt(ev.get("end", ""))
+        if start is not None and end is not None and start <= now <= end:
+            return ev
+    return None

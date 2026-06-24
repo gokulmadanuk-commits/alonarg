@@ -120,6 +120,27 @@
     finally { recordBtn.disabled = false; }
   }
 
+  // ---- meeting nudge banner -------------------------------------------
+  let _nudgeDismissed = null;
+  async function pollNudge() {
+    const banner = document.getElementById("nudge-banner");
+    if (!banner) return;
+    try {
+      const { ok, body } = await jsonFetch("/api/nudge/status");
+      if (!ok || !body) return;
+      const live = body.live_meeting;
+      const key = live ? (live.subject || "") + "|" + (live.start || "") : null;
+      if (body.nudgeable && key && key !== _nudgeDismissed) {
+        const txt = document.getElementById("nudge-text");
+        if (txt) txt.textContent = "📅 “" + (live.subject || "A meeting") + "” is happening now — record it?";
+        banner.dataset.key = key;
+        banner.hidden = false;
+      } else {
+        banner.hidden = true;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   // ---- recordings list polling (status badges in place) ---------------
   function anyActive() {
     return Array.from(document.querySelectorAll(".card [data-status]"))
@@ -575,6 +596,21 @@
   const searchInput = document.getElementById("search-input");
   if (searchInput) searchInput.addEventListener("input", debounce(onSearch, 250));
 
+  // meeting nudge banner
+  const nudgeRecord = document.getElementById("nudge-record");
+  if (nudgeRecord) nudgeRecord.addEventListener("click", async () => {
+    nudgeRecord.disabled = true;
+    try { await jsonFetch("/api/record/start", { method: "POST" }); } catch (e) { /* ignore */ }
+    const b = document.getElementById("nudge-banner"); if (b) b.hidden = true;
+    await pollStatus();
+    nudgeRecord.disabled = false;
+  });
+  const nudgeDismiss = document.getElementById("nudge-dismiss");
+  if (nudgeDismiss) nudgeDismiss.addEventListener("click", () => {
+    const b = document.getElementById("nudge-banner");
+    if (b) { _nudgeDismissed = b.dataset.key || "x"; b.hidden = true; }
+  });
+
   // ask across all meetings (dashboard)
   const gAskBtn = document.getElementById("global-ask-btn");
   const gAskInput = document.getElementById("global-ask-input");
@@ -627,5 +663,7 @@
     pollStatus();
     setInterval(pollStatus, STATUS_POLL_MS);
     if (anyActive()) startListPolling();
+    pollNudge();
+    setInterval(pollNudge, 20000);
   }
 })();

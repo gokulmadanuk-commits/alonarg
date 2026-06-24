@@ -48,6 +48,10 @@ SERVER_PORT = int(os.environ.get("ALONARG_PORT", "8765"))
 # --- Hotkey ---
 HOTKEY = os.environ.get("ALONARG_HOTKEY", "ctrl+alt+r")
 
+# --- Meeting nudges ---
+# How often the engine checks Outlook for an in-progress meeting (seconds).
+NUDGE_POLL_SECONDS = int(os.environ.get("ALONARG_NUDGE_POLL", "60"))
+
 # --- Auth / CORS (for the phone PWA upload endpoint) ---
 # Shared secret protecting the API. Empty string => auth disabled (open, the
 # current desktop-only behavior).

@@ -24,8 +24,10 @@ def main() -> None:
     Path(config.RECORDINGS_DIR).mkdir(parents=True, exist_ok=True)
 
     import uvicorn
+    from alonarg import server
+    server.start_nudge_scheduler(server.app)  # meeting nudges (web push + banner state)
     uvicorn.run(
-        "alonarg.server:app",
+        server.app,
         host=config.SERVER_HOST,
         port=config.SERVER_PORT,
         log_level="warning",

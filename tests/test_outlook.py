@@ -70,3 +70,22 @@ def test_read_events_window_outlook_unavailable(monkeypatch):
 def test_read_events_window_empty(monkeypatch):
     monkeypatch.setattr(outlook, "_run_ps", lambda s, timeout=60: "")
     assert outlook.read_events_window("a", "b") == []
+
+
+def test_find_current_event_skips_allday_and_declined(monkeypatch):
+    from datetime import timedelta
+
+    now = datetime.now().astimezone()
+    iso = lambda dt: dt.isoformat()  # noqa: E731
+    events = [
+        {"subject": "All day", "start": iso(now - timedelta(hours=1)), "end": iso(now + timedelta(hours=5)), "allDay": True, "response": 0},
+        {"subject": "Declined", "start": iso(now - timedelta(minutes=5)), "end": iso(now + timedelta(minutes=25)), "allDay": False, "response": 4},
+        {"subject": "Live", "start": iso(now - timedelta(minutes=5)), "end": iso(now + timedelta(minutes=25)), "allDay": False, "response": 3},
+    ]
+    monkeypatch.setattr(outlook, "read_events_window", lambda lo, hi: events)
+    assert outlook.find_current_event()["subject"] == "Live"
+
+
+def test_find_current_event_none(monkeypatch):
+    monkeypatch.setattr(outlook, "read_events_window", lambda lo, hi: [])
+    assert outlook.find_current_event() is None

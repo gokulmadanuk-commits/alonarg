@@ -788,6 +788,8 @@ function switchTab(tab) {
     trySync();
   } else if (tab === 'settings') {
     loadSettingsForm();
+  } else if (tab === 'record') {
+    pollLaptopStatus();
   }
 }
 
@@ -848,6 +850,128 @@ function onSaveSettings(e) {
 }
 
 /* =====================================================================
+ * Record on laptop (trigger the PC engine) + meeting nudges (web push)
+ * ===================================================================== */
+let _laptopRecording = false;
+
+async function pollLaptopStatus() {
+  const wrap = $('#laptop-rec');
+  const btn = $('#laptop-rec-btn');
+  if (!wrap || !btn) return;
+  const { configured } = getConfig();
+  wrap.hidden = !configured;
+  if (!configured) return;
+  try {
+    const resp = await apiFetch('/api/status');
+    if (!resp.ok) return;
+    const s = await resp.json();
+    _laptopRecording = !!s.recording;
+    btn.dataset.state = _laptopRecording ? 'recording' : 'idle';
+    btn.textContent = _laptopRecording ? 'Stop laptop recording' : 'Record on laptop';
+  } catch (_) {
+    /* laptop offline — leave button as-is */
+  }
+}
+
+async function toggleLaptopRecording() {
+  const btn = $('#laptop-rec-btn');
+  const wasRecording = _laptopRecording;
+  btn.disabled = true;
+  try {
+    const path = wasRecording ? '/api/record/stop' : '/api/record/start';
+    const resp = await apiFetch(path, { method: 'POST' });
+    if (resp.ok) {
+      toast(wasRecording ? 'Laptop recording stopped — processing.' : 'Recording on your laptop…');
+      await pollLaptopStatus();
+      if (wasRecording) refreshRecordings();
+    } else {
+      toast('Could not reach your laptop (HTTP ' + resp.status + ').');
+    }
+  } catch (_) {
+    toast('Could not reach your laptop. Is it awake and connected?');
+  }
+  btn.disabled = false;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+async function enableNudges() {
+  const result = $('#nudge-result');
+  result.hidden = false;
+  result.className = 'test-result';
+  result.textContent = 'Enabling…';
+  const { configured } = getConfig();
+  if (!configured) {
+    result.className = 'test-result fail';
+    result.textContent = 'Set the backend URL first.';
+    return;
+  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    result.className = 'test-result fail';
+    result.textContent =
+      "Push isn't supported here. On iPhone, add Alonarg to your Home Screen and open it from there (iOS 16.4+).";
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      result.className = 'test-result fail';
+      result.textContent = 'Notification permission was denied.';
+      return;
+    }
+    const keyResp = await apiFetch('/api/push/key');
+    if (!keyResp.ok) throw new Error('key ' + keyResp.status);
+    const { key } = await keyResp.json();
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key),
+    });
+    const subResp = await apiFetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+    if (!subResp.ok) throw new Error('subscribe ' + subResp.status);
+    result.className = 'test-result ok';
+    result.textContent = 'Nudges enabled on this device.';
+  } catch (err) {
+    result.className = 'test-result fail';
+    result.textContent = 'Could not enable nudges: ' + (err && err.message ? err.message : err);
+  }
+}
+
+async function testNudge() {
+  const result = $('#nudge-result');
+  result.hidden = false;
+  result.className = 'test-result';
+  result.textContent = 'Sending…';
+  try {
+    const resp = await apiFetch('/api/push/test', { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.sent > 0) {
+      result.className = 'test-result ok';
+      result.textContent = 'Test nudge sent — check your notifications.';
+    } else if (resp.ok) {
+      result.className = 'test-result fail';
+      result.textContent = 'No subscribed devices yet. Tap "Enable on this device" first.';
+    } else {
+      throw new Error('status ' + resp.status);
+    }
+  } catch (err) {
+    result.className = 'test-result fail';
+    result.textContent = 'Could not send a test nudge.';
+  }
+}
+
+/* =====================================================================
  * Service worker
  * ===================================================================== */
 function registerSW() {
@@ -881,6 +1005,11 @@ function init() {
   // Settings
   $('#settings-form').addEventListener('submit', onSaveSettings);
   $('#test-btn').addEventListener('click', onTestConnection);
+
+  // Record on laptop + meeting nudges
+  $('#laptop-rec-btn').addEventListener('click', toggleLaptopRecording);
+  $('#nudge-enable-btn').addEventListener('click', enableNudges);
+  $('#nudge-test-btn').addEventListener('click', testNudge);
 
   // Connection pill -> jump to settings
   $('#conn-pill').addEventListener('click', () => switchTab('settings'));
@@ -930,11 +1059,12 @@ function init() {
   // Initial load
   checkConnection().then((ok) => {
     refreshRecordings();
+    pollLaptopStatus();
     if (ok) trySync();
   });
 
   // Periodic connection heartbeat
-  _connTimer = setInterval(checkConnection, 30000);
+  _connTimer = setInterval(() => { checkConnection(); pollLaptopStatus(); }, 30000);
 }
 
 if (document.readyState === 'loading') {
