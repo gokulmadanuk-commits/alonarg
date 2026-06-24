@@ -27,6 +27,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
 from alonarg import (
+    analytics,
     assistant,
     audio_capture,
     autorecord,
@@ -36,6 +37,7 @@ from alonarg import (
     msgraph,
     pipeline,
     push,
+    summarize,
 )
 from alonarg.db import Database
 from alonarg.types import SummaryResult
@@ -201,6 +203,13 @@ def _merge_meta(current: dict, detected: dict) -> dict:
     return {"people": people, "contacts": contacts}
 
 
+def _merge_state(current: dict | None, updates: dict) -> dict:
+    """Shallow-merge UI state (pinned / tags / template / done_actions)."""
+    state = dict(current or {})
+    state.update(updates)
+    return state
+
+
 def _begin_recording(app) -> int:
     """Create a recording row, make its folder, and start the recorder.
 
@@ -334,8 +343,16 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         rec = db.get_recording(rec_id)
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
+        tt = analytics.talk_time((rec.get("transcript") or {}).get("segments"))
         return templates.TemplateResponse(
-            request, "detail.html", {"rec": rec, "token": config.ALONARG_TOKEN}
+            request,
+            "detail.html",
+            {
+                "rec": rec,
+                "token": config.ALONARG_TOKEN,
+                "talk_time": tt,
+                "templates": summarize.template_choices(),
+            },
         )
 
     # -- recording control / status --------------------------------------
@@ -449,6 +466,28 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         )
         db.set_summary(rec_id, merged)
         return merged.to_dict()
+
+    @app.post("/api/recordings/{rec_id}/resummarize", dependencies=[Depends(require_auth)])
+    def api_resummarize(rec_id: int, template: str = Body("general", embed=True)):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        transcript = (rec.get("transcript") or {}).get("text", "")
+        if not transcript.strip():
+            raise HTTPException(status_code=400, detail="No transcript to summarize yet")
+        if template not in summarize.TEMPLATES:
+            template = "general"
+        try:
+            result = summarize.summarize(transcript, template=template)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        # Keep the user's (possibly edited) title rather than the model's.
+        cur_title = (rec.get("title") or "").strip()
+        if cur_title:
+            result.title = cur_title
+        db.set_summary(rec_id, result)
+        db.set_state(rec_id, _merge_state(rec.get("state"), {"template": template}))
+        return {"summary": result.to_dict(), "template": template}
 
     @app.put("/api/recordings/{rec_id}/meta", dependencies=[Depends(require_auth)])
     def api_update_meta(
@@ -582,6 +621,65 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         return draft
+
+    # -- tags / pin + global action-item (tasks) hub ---------------------
+    @app.put("/api/recordings/{rec_id}/state", dependencies=[Depends(require_auth)])
+    def api_update_state(
+        rec_id: int,
+        tags: list[str] | None = Body(default=None),
+        pinned: bool | None = Body(default=None),
+    ):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        updates: dict = {}
+        if tags is not None:
+            updates["tags"] = _clean_list(tags)
+        if pinned is not None:
+            updates["pinned"] = bool(pinned)
+        state = _merge_state(rec.get("state"), updates)
+        db.set_state(rec_id, state)
+        return state
+
+    @app.get("/api/action-items", dependencies=[Depends(require_auth)])
+    def api_action_items(open_only: bool = False):
+        """Every action item across all meetings, with its done state."""
+        out: list[dict] = []
+        for row in db.list_recordings():
+            summ = row.get("summary") or {}
+            items = summ.get("action_items") or []
+            if not items:
+                continue
+            done = set((row.get("state") or {}).get("done_actions") or [])
+            for it in items:
+                is_done = it in done
+                if open_only and is_done:
+                    continue
+                out.append({
+                    "recording_id": row["id"],
+                    "title": row.get("title") or "Untitled",
+                    "created_at": row.get("created_at") or "",
+                    "item": it,
+                    "done": is_done,
+                })
+        return out
+
+    @app.post("/api/action-items/toggle", dependencies=[Depends(require_auth)])
+    def api_toggle_action(
+        recording_id: int = Body(...),
+        item: str = Body(...),
+        done: bool = Body(...),
+    ):
+        rec = db.get_recording(recording_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        state = dict(rec.get("state") or {})
+        done_actions = [d for d in (state.get("done_actions") or []) if d != item]
+        if done:
+            done_actions.append(item)
+        state["done_actions"] = done_actions
+        db.set_state(recording_id, state)
+        return {"ok": True, "done": done}
 
     # -- meeting nudges + web push ---------------------------------------
     @app.get("/api/nudge/status", dependencies=[Depends(require_auth)])
