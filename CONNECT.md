@@ -14,10 +14,29 @@ where the models live. So the phone needs a way to reach your PC.
 2. **Add to Home Screen** (iOS Safari: Share → Add to Home Screen; Android Chrome: ⋮ → Install app).
 3. You can already record meetings — they're saved on the phone and will upload once the PC is reachable.
 
-## 2. Expose your PC to the phone (one command when you're back at the PC)
+## 2. Recommended: Tailscale (stable, private — what this setup uses)
+
+Tailscale is a free private network. Your laptop and phone join it, and the phone reaches the
+engine over an HTTPS address that **never changes** and is visible only to your own devices.
+
+**Laptop (one-time):**
+1. `winget install Tailscale.Tailscale`, then sign in: `tailscale up` (opens a browser).
+2. Enable HTTPS/Serve for your tailnet — click the link the CLI prints and press **Enable**.
+3. Expose the engine: `tailscale serve --bg 8765` → gives `https://<machine>.<tailnet>.ts.net`.
+
+**Phone (one-time):** install the Tailscale app and sign in with the **same account**.
+
+**In the PWA → Settings:** set **Backend URL** to your `https://<machine>.<tailnet>.ts.net`
+address (no token needed — Tailscale already limits access to your own devices), then
+**Test connection** → **Save**.
+
+Everything persists across reboots: the engine auto-starts (Startup folder), Tailscale
+auto-starts, and the serve config is remembered.
+
+## 3. Alternative: free Cloudflare tunnel (changes on restart)
 
 Because the PWA is served over HTTPS, the phone can't talk to a plain `http://192.168.x.x` LAN
-address (browsers block mixed content). The clean fix is a free HTTPS tunnel. A helper does it all:
+address (browsers block mixed content). The quick alternative is a free HTTPS tunnel. A helper does it all:
 
 ```powershell
 .\connect.ps1
