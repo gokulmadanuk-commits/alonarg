@@ -18,7 +18,7 @@ import shutil
 import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -235,6 +235,17 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
         return rec
+
+    @app.patch("/api/recordings/{rec_id}", dependencies=[Depends(require_auth)])
+    def api_rename(rec_id: int, title: str = Body(..., embed=True)):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        new_title = (title or "").strip()
+        if not new_title:
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        db.update_recording(rec_id, title=new_title)
+        return {"id": rec_id, "title": new_title}
 
     @app.delete("/api/recordings/{rec_id}", dependencies=[Depends(require_auth)])
     def api_delete(rec_id: int):

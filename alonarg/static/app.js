@@ -176,13 +176,79 @@
     }
   }
 
+  // ---- edit title (detail page) ---------------------------------------
+  async function startTitleEdit() {
+    const h2 = document.getElementById("detail-title");
+    const editBtn = document.querySelector(".edit-title-btn");
+    if (!h2 || document.querySelector(".title-edit")) return;
+    const id = h2.getAttribute("data-id");
+    const current = h2.textContent.trim();
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "title-input";
+    input.value = current;
+    input.maxLength = 200;
+    const save = document.createElement("button");
+    save.type = "button"; save.className = "btn btn-accent"; save.textContent = "Save";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "btn btn-ghost"; cancel.textContent = "Cancel";
+    const editor = document.createElement("div");
+    editor.className = "title-edit";
+    editor.append(input, save, cancel);
+
+    h2.hidden = true;
+    if (editBtn) editBtn.hidden = true;
+    h2.parentNode.insertBefore(editor, h2.nextSibling);
+    input.focus();
+    input.select();
+
+    function cleanup() {
+      editor.remove();
+      h2.hidden = false;
+      if (editBtn) editBtn.hidden = false;
+    }
+    async function doSave() {
+      const title = input.value.trim();
+      if (!title) { input.focus(); return; }
+      save.disabled = true; cancel.disabled = true;
+      const { ok, body } = await jsonFetch("/api/recordings/" + id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title }),
+      });
+      if (ok) {
+        const newTitle = (body && body.title) || title;
+        h2.textContent = newTitle;
+        document.title = newTitle + " · Alonarg";
+        cleanup();
+      } else {
+        save.disabled = false; cancel.disabled = false;
+      }
+    }
+    save.addEventListener("click", doSave);
+    cancel.addEventListener("click", cleanup);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doSave(); }
+      else if (e.key === "Escape") { e.preventDefault(); cleanup(); }
+    });
+  }
+
   // ---- wiring ---------------------------------------------------------
   document.addEventListener("click", (ev) => {
     const del = ev.target.closest(".delete-btn");
-    if (del) { ev.preventDefault(); onDeleteClick(del); }
+    if (del) { ev.preventDefault(); onDeleteClick(del); return; }
+    // Clickable card: open the recording unless an interactive element was clicked.
+    const card = ev.target.closest(".card[data-href]");
+    if (card && !ev.target.closest("a, button, input, textarea")) {
+      window.location.href = card.getAttribute("data-href");
+    }
   });
 
   if (recordBtn) recordBtn.addEventListener("click", onRecordClick);
+
+  const editTitleBtn = document.querySelector(".edit-title-btn");
+  if (editTitleBtn) editTitleBtn.addEventListener("click", startTitleEdit);
 
   formatStaticCells(document);
   authenticateAudio(document);

@@ -32,7 +32,7 @@
 
     <ul id="recordings" class="cards">
       {% for r in recordings %}
-      <li class="card" data-id="{{ r.id }}">
+      <li class="card" data-id="{{ r.id }}" data-href="/recording/{{ r.id }}">
         <div class="card-main">
           <a class="card-title" href="/recording/{{ r.id }}">{{ r.title or "Untitled recording" }}</a>
           <div class="card-meta">
@@ -51,7 +51,6 @@
           </div>
         </div>
         <div class="card-actions">
-          <a class="btn btn-ghost" href="/recording/{{ r.id }}">Open</a>
           <button class="btn btn-danger delete-btn" type="button" data-id="{{ r.id }}">Delete</button>
         </div>
       </li>

@@ -17,7 +17,10 @@
   </header>
 
   <main class="container detail">
-    <h2 class="detail-title">{{ rec.title or "Untitled recording" }}</h2>
+    <div class="title-row">
+      <h2 class="detail-title" id="detail-title" data-id="{{ rec.id }}">{{ rec.title or "Untitled recording" }}</h2>
+      <button class="btn btn-ghost edit-title-btn" type="button" title="Rename meeting">Edit title</button>
+    </div>
     <div class="card-meta">
       <span class="meta-date" data-created="{{ rec.created_at }}">{{ rec.created_at }}</span>
       <span class="dot-sep">&middot;</span>
