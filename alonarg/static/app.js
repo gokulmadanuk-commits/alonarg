@@ -226,7 +226,9 @@
 
   // ---- calendar week view + auto-record toggles -----------------------
   let _calEvents = {};
-  const HOUR_PX = 46; // pixels per hour in the week time-grid
+  let _calLastEvents = null; // cached for re-render on resize
+  // Minimum pixels per hour: keeps a 30-min slot tall enough to read its title.
+  const MIN_HOUR_PX = 72;
   function sameDay(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
@@ -285,6 +287,7 @@
   function renderCalendar(events) {
     const body = document.getElementById("calendar-body");
     _calEvents = {};
+    _calLastEvents = events;
     closePopover();
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const days = [];
@@ -310,7 +313,12 @@
     });
     const startHour = Math.max(0, minHour);
     const endHour = Math.min(24, Math.max(maxHour, startHour + 1));
-    const totalPx = (endHour - startHour) * HOUR_PX;
+    const totalHours = endHour - startHour;
+    // Stretch the grid to fill the viewport height; never go below MIN_HOUR_PX
+    // (so a 30-min meeting still shows its title). Scrolls if the day is long.
+    const avail = Math.max(360, Math.floor(window.innerHeight - body.getBoundingClientRect().top - 24));
+    const hourPx = Math.max(MIN_HOUR_PX, avail / totalHours);
+    const totalPx = hourPx * totalHours;
 
     const grid = elc("div", "cal-grid");
     grid.appendChild(elc("div", "cal-corner"));
@@ -325,7 +333,7 @@
     const gutter = elc("div", "cal-gutter"); gutter.style.height = totalPx + "px";
     for (let hr = startHour; hr < endHour; hr++) {
       const lbl = elc("div", "cal-hourlabel");
-      lbl.style.top = (hr - startHour) * HOUR_PX + "px";
+      lbl.style.top = (hr - startHour) * hourPx + "px";
       lbl.textContent = fmtHour(hr);
       gutter.appendChild(lbl);
     }
@@ -334,24 +342,25 @@
     days.forEach((d, idx) => {
       const col = elc("div", "cal-daycol" + (idx === 0 ? " today" : ""));
       col.style.height = totalPx + "px";
-      col.style.backgroundSize = "100% " + HOUR_PX + "px";
+      col.style.backgroundSize = "100% " + hourPx + "px";
       packDay(byDay[idx]);
-      byDay[idx].forEach((it) => col.appendChild(eventBlock(it, startHour)));
-      if (idx === 0) addNowLine(col, startHour, endHour);
+      byDay[idx].forEach((it) => col.appendChild(eventBlock(it, startHour, hourPx)));
+      if (idx === 0) addNowLine(col, startHour, endHour, hourPx);
       grid.appendChild(col);
     });
 
     const week = elc("div", "cal-week");
+    week.style.height = Math.min(avail, totalPx) + "px";
     week.appendChild(grid);
     body.innerHTML = "";
     body.appendChild(week);
   }
 
-  function eventBlock(it, startHour) {
+  function eventBlock(it, startHour, hourPx) {
     const ev = it.ev;
     const cols = it.cols || 1, lane = it.lane || 0;
-    const top = (it.sMin - startHour * 60) / 60 * HOUR_PX;
-    const height = Math.max(20, (it.eMin - it.sMin) / 60 * HOUR_PX);
+    const top = (it.sMin - startHour * 60) / 60 * hourPx;
+    const height = Math.max(20, (it.eMin - it.sMin) / 60 * hourPx);
     const el = elc("div", "cal-ev" + (ev.auto_record ? " armed" : ""));
     el.dataset.key = ev.key;
     el.style.top = top + "px";
@@ -366,12 +375,12 @@
     return el;
   }
 
-  function addNowLine(col, startHour, endHour) {
+  function addNowLine(col, startHour, endHour, hourPx) {
     const now = new Date();
     const mins = now.getHours() * 60 + now.getMinutes();
     if (mins < startHour * 60 || mins > endHour * 60) return;
     const line = elc("div", "cal-now");
-    line.style.top = (mins - startHour * 60) / 60 * HOUR_PX + "px";
+    line.style.top = (mins - startHour * 60) / 60 * hourPx + "px";
     col.appendChild(line);
   }
 
@@ -992,6 +1001,11 @@
     if (document.querySelector(".view[data-view]")) {
       window.addEventListener("hashchange", () => showView(currentView()));
       showView(currentView());
+      // re-fit the calendar grid to the window when it resizes
+      window.addEventListener("resize", debounce(() => {
+        const cal = document.querySelector('.view[data-view="calendar"]');
+        if (cal && !cal.hidden && _calLastEvents) renderCalendar(_calLastEvents);
+      }, 200));
     }
   }
 })();

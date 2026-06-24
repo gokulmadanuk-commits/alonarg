@@ -519,8 +519,7 @@ body {
 /* ===== Calendar week time-grid (Outlook-style) ===== */
 #calendar-body .cal-week,
 .cal-week {
-  overflow: auto;
-  max-height: calc(100vh - 210px);
+  overflow: auto;            /* height is set inline to fill the viewport */
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-card);
