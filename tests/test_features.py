@@ -97,6 +97,23 @@ def test_ask_global(tmp_db_path, tmp_path, monkeypatch):
     db.close()
 
 
+def test_ask_global_includes_computed_stats(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    _seed(db)  # one meeting has 1 action item, the other has none; neither has next steps
+    captured = {}
+    monkeypatch.setattr(assistant, "ask", lambda q, ctx, **k: captured.update(ctx=ctx) or "ok")
+    r = client.post("/api/ask", json={"question": "how many meetings have no action items?"})
+    assert r.status_code == 200
+    ctx = captured["ctx"]
+    assert "Total meetings: 2" in ctx
+    assert "Meetings WITH action items: 1" in ctx
+    assert "Meetings WITH NO action items: 1" in ctx
+    assert "Meetings WITH NO next steps: 2" in ctx
+    # per-meeting metadata table carries the counts too
+    assert "action_items: 1" in ctx and "action_items: 0" in ctx
+    db.close()
+
+
 def test_ask_empty_question_400(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     _seed(db)

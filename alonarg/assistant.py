@@ -54,8 +54,12 @@ def ask(question: str, context_text: str, **kw) -> str:
     """Answer a question grounded ONLY in the provided meeting text."""
     system = (
         "You answer questions about the user's meetings using ONLY the provided "
-        "notes and transcripts. If the answer is not in them, say you couldn't "
-        "find it in the meetings. Be concise and specific."
+        "information: an optional computed OVERVIEW with exact counts, a "
+        "per-meeting metadata table (status, action item / next step counts, "
+        "duration, date), and meeting summaries/transcripts. For counting or "
+        "'how many' questions, use the exact numbers from the OVERVIEW/metadata "
+        "instead of counting yourself. If the answer isn't present, say you "
+        "couldn't find it in the meetings. Be concise and specific."
     )
     user = (
         "=== MEETING NOTES & TRANSCRIPTS ===\n"

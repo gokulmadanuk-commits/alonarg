@@ -71,12 +71,70 @@ def _context_for_recording(rec: dict) -> str:
     return "\n".join(parts)
 
 
+def _meeting_metadata(row: dict) -> dict:
+    """Lightweight, countable metadata for one recording (from a list row)."""
+    summ = row.get("summary") or {}
+    return {
+        "id": row["id"],
+        "title": row.get("title") or "Untitled",
+        "created_at": row.get("created_at") or "",
+        "duration_s": int(row.get("duration_s") or 0),
+        "status": row.get("status") or "",
+        "n_action_items": len(summ.get("action_items") or []),
+        "n_next_steps": len(summ.get("next_steps") or []),
+    }
+
+
+def _stats_block(rows: list[dict]) -> str:
+    """Computed overview + per-meeting metadata table for the LLM.
+
+    Counting/"how many" questions are answered from these exact numbers rather
+    than by making the model count across transcripts (which it does poorly).
+    """
+    metas = [_meeting_metadata(r) for r in rows]
+    total = len(metas)
+    with_ai = sum(1 for m in metas if m["n_action_items"] > 0)
+    with_ns = sum(1 for m in metas if m["n_next_steps"] > 0)
+    by_status: dict[str, int] = {}
+    for m in metas:
+        by_status[m["status"]] = by_status.get(m["status"], 0) + 1
+    status_line = ", ".join(f"{k}: {v}" for k, v in sorted(by_status.items())) or "n/a"
+    lines = [
+        "=== OVERVIEW (exact counts computed from ALL meetings) ===",
+        f"Total meetings: {total}",
+        f"By status -> {status_line}",
+        f"Meetings WITH action items: {with_ai}",
+        f"Meetings WITH NO action items: {total - with_ai}",
+        f"Meetings WITH next steps: {with_ns}",
+        f"Meetings WITH NO next steps: {total - with_ns}",
+        f"Total action items (all meetings): {sum(m['n_action_items'] for m in metas)}",
+        f"Total next steps (all meetings): {sum(m['n_next_steps'] for m in metas)}",
+        f"Total recorded seconds (all meetings): {sum(m['duration_s'] for m in metas)}",
+        "",
+        "=== PER-MEETING METADATA (all meetings) ===",
+    ]
+    for m in metas:
+        lines.append(
+            f'- #{m["id"]} "{m["title"]}" | date: {m["created_at"]} | '
+            f'duration_s: {m["duration_s"]} | status: {m["status"]} | '
+            f'action_items: {m["n_action_items"]} | next_steps: {m["n_next_steps"]}'
+        )
+    return "\n".join(lines)
+
+
 def _global_context(db, budget: int = 12000) -> tuple[str, list[int]]:
-    """Concatenate recordings (newest-first) into a char-budgeted context block."""
-    chunks: list[str] = []
+    """Build context for an across-all-meetings question.
+
+    Always includes a computed OVERVIEW + per-meeting metadata (so counting
+    questions are exact and cover every meeting), then as much detailed content
+    (summaries + transcripts, newest-first) as fits in ``budget``.
+    """
+    rows = db.list_recordings()
+    stats = _stats_block(rows)
+    chunks: list[str] = [stats, "\n=== MEETING DETAILS (summaries + transcripts) ==="]
     used: list[int] = []
-    total = 0
-    for row in db.list_recordings():
+    total = len(stats)
+    for row in rows:
         rec = db.get_recording(row["id"])
         if rec is None:
             continue
