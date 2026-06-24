@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const CACHE = 'alonarg-shell-v4';
+const CACHE = 'alonarg-shell-v5';
 
 const SHELL = [
   './',
@@ -86,27 +86,23 @@ self.addEventListener('fetch', (event) => {
     return; // let the browser handle it normally
   }
 
-  // Navigation requests: serve the cached shell so the app launches offline.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      caches.match('./index.html').then((cached) => cached || fetch(req))
-    );
-    return;
-  }
-
-  // Same-origin static assets: cache-first, then network (and cache the result).
+  // Network-first for the app shell: always get the latest when online, so
+  // updates appear immediately; fall back to cache (and index.html) when offline.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((resp) => {
-          if (resp && resp.ok && resp.type === 'basic') {
-            const copy = resp.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
-          }
-          return resp;
+    fetch(req)
+      .then((resp) => {
+        if (resp && resp.ok && resp.type === 'basic') {
+          const copy = resp.clone();
+          caches.open(CACHE).then((cache) => cache.put(req, copy));
+        }
+        return resp;
+      })
+      .catch(() =>
+        caches.match(req).then((cached) => {
+          if (cached) return cached;
+          if (req.mode === 'navigate') return caches.match('./index.html');
+          return undefined;
         })
-        .catch(() => cached);
-    })
+      )
   );
 });

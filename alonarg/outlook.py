@@ -17,7 +17,11 @@ from datetime import datetime, timedelta
 # window and prints them as JSON. Exchange addresses are resolved to SMTP.
 _PS_TEMPLATE = r"""
 $ErrorActionPreference = 'Stop'
-try { $ol = New-Object -ComObject Outlook.Application } catch { Write-Output '{"error":"outlook_unavailable"}'; exit 0 }
+# Only touch Outlook if CLASSIC Outlook (OUTLOOK.EXE) is already running, and only
+# ATTACH to it (GetActiveObject). Never New-Object: that launches classic Outlook
+# and re-loads COM add-ins (e.g. HubSpot Sales), popping their sign-in window.
+if (-not (Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue)) { Write-Output '{"error":"outlook_unavailable"}'; exit 0 }
+try { $ol = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application') } catch { Write-Output '{"error":"outlook_unavailable"}'; exit 0 }
 $ns = $ol.GetNamespace('MAPI')
 $cal = $ns.GetDefaultFolder(9)
 $items = $cal.Items
@@ -71,7 +75,10 @@ def read_events_window(lo_local: str, hi_local: str) -> list[dict]:
     data = json.loads(out)
     if isinstance(data, dict):
         if data.get("error") == "outlook_unavailable":
-            raise RuntimeError("Outlook desktop isn't available. Open Outlook and try again.")
+            raise RuntimeError(
+                "Classic Outlook (desktop) isn't running. Calendar features read classic "
+                "Outlook's local data via COM; 'new Outlook' (olk.exe) isn't supported locally."
+            )
         data = [data]
     return data
 
@@ -132,7 +139,11 @@ def find_current_event(window_minutes: int = 2) -> dict | None:
     now = datetime.now().astimezone()
     lo = (now - timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
     hi = (now + timedelta(minutes=window_minutes)).strftime("%m/%d/%Y %I:%M %p")
-    for ev in read_events_window(lo, hi):
+    try:
+        events = read_events_window(lo, hi)
+    except RuntimeError:
+        return None  # classic Outlook not running -> just skip this check
+    for ev in events:
         if ev.get("allDay"):
             continue
         if ev.get("response") == _DECLINED:
