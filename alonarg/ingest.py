@@ -15,6 +15,7 @@ background thread).
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 
 from alonarg import summarize as summarize_mod
@@ -32,7 +33,8 @@ def convert_to_wav(src_path: str, dst_path: str) -> None:
     (including ffmpeg's stderr) on a non-zero exit.
     """
     argv = ["ffmpeg", "-y", "-i", str(src_path), "-ac", "1", "-ar", "16000", str(dst_path)]
-    result = subprocess.run(argv, capture_output=True, text=True)
+    no_window = 0x08000000 if os.name == "nt" else 0  # don't flash a console window
+    result = subprocess.run(argv, capture_output=True, text=True, creationflags=no_window)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg failed to convert {src_path!r} (exit {result.returncode}): "

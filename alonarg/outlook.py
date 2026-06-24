@@ -10,8 +10,12 @@ its attendees (name + resolved SMTP email).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timedelta
+
+# Run child processes without flashing a console window (the engine has none).
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 # PowerShell that lists calendar items overlapping a [__LO__, __HI__] local-time
 # window and prints them as JSON. Exchange addresses are resolved to SMTP.
@@ -61,7 +65,7 @@ ConvertTo-Json -InputObject @($out) -Depth 6
 def _run_ps(script: str, timeout: int = 60) -> str:
     proc = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True, text=True, timeout=timeout, creationflags=_NO_WINDOW,
     )
     return proc.stdout or ""
 

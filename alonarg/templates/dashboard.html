@@ -76,6 +76,20 @@
       </li>
       {% endfor %}
     </ul>
+
+    <section class="panel calendar-panel">
+      <div class="cal-row">
+        <div>
+          <strong>Calendar</strong>
+          <div id="cal-status" class="muted">Checking…</div>
+        </div>
+        <div class="cal-actions">
+          <button id="cal-connect" class="btn btn-accent" type="button" hidden>Connect Outlook calendar</button>
+          <button id="cal-disconnect" class="btn btn-ghost" type="button" hidden>Disconnect</button>
+        </div>
+      </div>
+      <div id="cal-login" class="cal-login" hidden></div>
+    </section>
   </main>
 
   <script>window.ALONARG_TOKEN={{ token|tojson }};</script>

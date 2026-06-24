@@ -49,8 +49,15 @@ SERVER_PORT = int(os.environ.get("ALONARG_PORT", "8765"))
 HOTKEY = os.environ.get("ALONARG_HOTKEY", "ctrl+alt+r")
 
 # --- Meeting nudges ---
-# How often the engine checks Outlook for an in-progress meeting (seconds).
+# How often the engine checks the calendar for an in-progress meeting (seconds).
 NUDGE_POLL_SECONDS = int(os.environ.get("ALONARG_NUDGE_POLL", "60"))
+
+# --- Microsoft Graph (calendar for "new Outlook" / Microsoft 365) ---
+# Public client for device-code login. Default is Microsoft's first-party
+# "Graph CLI" client, so no app registration is needed. Override with your own
+# app's client id (and authority) if your org blocks it.
+GRAPH_CLIENT_ID = os.environ.get("ALONARG_GRAPH_CLIENT_ID", "14d82eec-204b-4c2f-b7e8-296a70dab67e")
+GRAPH_AUTHORITY = os.environ.get("ALONARG_GRAPH_AUTHORITY", "https://login.microsoftonline.com/common")
 
 # --- Auth / CORS (for the phone PWA upload endpoint) ---
 # Shared secret protecting the API. Empty string => auth disabled (open, the

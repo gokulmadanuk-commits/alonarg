@@ -37,7 +37,8 @@ def test_subscriptions_add_list_remove(push_dir):
 
 
 def test_send_to_all_no_subs(push_dir):
-    assert push.send_to_all("t", "b") == {"sent": 0, "removed": 0}
+    res = push.send_to_all("t", "b")
+    assert res["sent"] == 0 and res["removed"] == 0 and res["total"] == 0
 
 
 def test_send_to_all_sends_and_prunes(push_dir, monkeypatch):
@@ -52,5 +53,6 @@ def test_send_to_all_sends_and_prunes(push_dir, monkeypatch):
         return True
 
     monkeypatch.setattr(pywebpush, "webpush", fake_webpush)
-    assert push.send_to_all("Title", "Body", "/") == {"sent": 1, "removed": 1}
+    res = push.send_to_all("Title", "Body", "/")
+    assert res["sent"] == 1 and res["removed"] == 1
     assert [s["endpoint"] for s in push.list_subscriptions()] == ["https://good/1"]

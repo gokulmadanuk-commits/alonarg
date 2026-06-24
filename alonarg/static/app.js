@@ -141,6 +141,71 @@
     } catch (e) { /* ignore */ }
   }
 
+  // ---- calendar (Microsoft Graph) connect -----------------------------
+  let _calPollTimer = null;
+  async function refreshCalStatus() {
+    const statusEl = document.getElementById("cal-status");
+    const connectBtn = document.getElementById("cal-connect");
+    const disconnectBtn = document.getElementById("cal-disconnect");
+    if (!statusEl || !connectBtn || !disconnectBtn) return;
+    try {
+      const { ok, body } = await jsonFetch("/api/graph/status");
+      if (!ok || !body) return;
+      if (body.signed_in) {
+        statusEl.textContent = "Connected" + (body.account ? " — " + body.account : "");
+        connectBtn.hidden = true;
+        disconnectBtn.hidden = false;
+        const login = document.getElementById("cal-login");
+        if (login) login.hidden = true;
+      } else {
+        statusEl.textContent = body.pending
+          ? "Waiting for sign-in…"
+          : "Not connected — needed for meeting sync & nudges.";
+        connectBtn.hidden = false;
+        disconnectBtn.hidden = true;
+      }
+    } catch (e) { /* ignore */ }
+  }
+  async function connectCalendar() {
+    const btn = document.getElementById("cal-connect");
+    const login = document.getElementById("cal-login");
+    btn.disabled = true;
+    try {
+      const { ok, body } = await jsonFetch("/api/graph/login", { method: "POST" });
+      if (!ok || !body || !body.user_code) {
+        login.hidden = false;
+        login.textContent = (body && body.detail) || "Could not start Microsoft sign-in.";
+        btn.disabled = false;
+        return;
+      }
+      const uri = body.verification_uri || "https://microsoft.com/devicelogin";
+      login.hidden = false;
+      login.innerHTML =
+        'Go to <a href="' + uri + '" target="_blank" rel="noopener">' + uri +
+        '</a> and enter code <strong>' + esc(body.user_code) + "</strong>, then sign in. (Waiting…)";
+      try { window.open(uri, "_blank"); } catch (e) { /* popup blocked */ }
+      if (_calPollTimer) clearInterval(_calPollTimer);
+      _calPollTimer = setInterval(async () => {
+        const r = await jsonFetch("/api/graph/status");
+        if (r.ok && r.body && r.body.signed_in) {
+          clearInterval(_calPollTimer); _calPollTimer = null;
+          await refreshCalStatus();
+          toast("Calendar connected");
+        }
+      }, 3000);
+    } catch (e) {
+      login.hidden = false;
+      login.textContent = "Could not start Microsoft sign-in.";
+    }
+    btn.disabled = false;
+  }
+  async function disconnectCalendar() {
+    await jsonFetch("/api/graph/logout", { method: "POST" });
+    if (_calPollTimer) { clearInterval(_calPollTimer); _calPollTimer = null; }
+    await refreshCalStatus();
+    toast("Calendar disconnected");
+  }
+
   // ---- recordings list polling (status badges in place) ---------------
   function anyActive() {
     return Array.from(document.querySelectorAll(".card [data-status]"))
@@ -611,6 +676,12 @@
     if (b) { _nudgeDismissed = b.dataset.key || "x"; b.hidden = true; }
   });
 
+  // calendar connect
+  const calConnect = document.getElementById("cal-connect");
+  if (calConnect) calConnect.addEventListener("click", connectCalendar);
+  const calDisconnect = document.getElementById("cal-disconnect");
+  if (calDisconnect) calDisconnect.addEventListener("click", disconnectCalendar);
+
   // ask across all meetings (dashboard)
   const gAskBtn = document.getElementById("global-ask-btn");
   const gAskInput = document.getElementById("global-ask-input");
@@ -665,5 +736,6 @@
     if (anyActive()) startListPolling();
     pollNudge();
     setInterval(pollNudge, 20000);
+    refreshCalStatus();
   }
 })();

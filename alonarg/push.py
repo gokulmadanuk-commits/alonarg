@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import threading
 from pathlib import Path
 
 from alonarg import config
 
 _lock = threading.Lock()
-VAPID_SUB = "mailto:alonarg@localhost"
+# VAPID "sub" must be a valid mailto:/https: contact. Apple rejects "localhost"
+# with 403 BadJwtToken. Override via ALONARG_VAPID_SUB if you like.
+VAPID_SUB = os.environ.get("ALONARG_VAPID_SUB", "mailto:nudges@alonarg.app")
 
 
 def _priv_path() -> Path:
@@ -98,10 +101,11 @@ def send_to_all(title: str, body: str, url: str = "/", data: dict | None = None)
 
     subs = list_subscriptions()
     if not subs:
-        return {"sent": 0, "removed": 0}
+        return {"sent": 0, "removed": 0, "total": 0, "errors": []}
     _appkey, priv_path = get_or_create_keys()
     payload = json.dumps({"title": title, "body": body, "url": url, "data": data or {}})
     sent = removed = 0
+    errors: list[str] = []
     for sub in subs:
         try:
             webpush(
@@ -113,10 +117,13 @@ def send_to_all(title: str, body: str, url: str = "/", data: dict | None = None)
             )
             sent += 1
         except WebPushException as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
             if status in (404, 410):
                 remove_subscription(sub.get("endpoint", ""))
                 removed += 1
-        except Exception:  # noqa: BLE001 - never let one bad sub break the rest
-            pass
-    return {"sent": sent, "removed": removed}
+            else:
+                errors.append(f"{status}: {(getattr(resp, 'text', '') or str(exc))[:120]}")
+        except Exception as exc:  # noqa: BLE001 - never let one bad sub break the rest
+            errors.append(str(exc)[:120])
+    return {"sent": sent, "removed": removed, "total": len(subs), "errors": errors}

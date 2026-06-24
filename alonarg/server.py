@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from alonarg import assistant, audio_capture, config, ingest, outlook, pipeline, push
+from alonarg import assistant, audio_capture, calendars, config, ingest, msgraph, pipeline, push
 from alonarg.db import Database
 from alonarg.types import SummaryResult
 
@@ -444,11 +444,11 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
         try:
-            event = outlook.find_event_for(rec.get("created_at") or "")
+            event = calendars.find_event_for(rec.get("created_at") or "")
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=503, detail=f"Could not read Outlook calendar: {exc}")
+            raise HTTPException(status_code=503, detail=f"Could not read the calendar: {exc}")
         if not event:
             return {"matched": False}
         people: list[str] = []
@@ -564,6 +564,27 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     def push_test():
         return push.send_to_all("Alonarg", "Test nudge — this is how meeting reminders look.", "/")
 
+    # -- Microsoft Graph calendar (new Outlook / M365) -------------------
+    @app.get("/api/graph/status", dependencies=[Depends(require_auth)])
+    def graph_status():
+        return {
+            "signed_in": msgraph.is_signed_in(),
+            "account": msgraph.account_name(),
+            "pending": msgraph.login_pending(),
+        }
+
+    @app.post("/api/graph/login", dependencies=[Depends(require_auth)])
+    def graph_login():
+        try:
+            return msgraph.start_device_login()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+
+    @app.post("/api/graph/logout", dependencies=[Depends(require_auth)])
+    def graph_logout():
+        msgraph.sign_out()
+        return {"signed_in": False}
+
     # -- audio playback ---------------------------------------------------
     @app.get("/audio/{rec_id}", dependencies=[Depends(require_auth)])
     def audio(rec_id: int):
@@ -591,7 +612,7 @@ def start_nudge_scheduler(app) -> threading.Thread:
         nudged: set = set()
         while True:
             try:
-                event = outlook.find_current_event()
+                event = calendars.find_current_event()
             except Exception:  # noqa: BLE001
                 event = None
             app.state.live_meeting = (

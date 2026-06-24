@@ -959,9 +959,12 @@ async function testNudge() {
     if (resp.ok && data.sent > 0) {
       result.className = 'test-result ok';
       result.textContent = 'Test nudge sent — check your notifications.';
-    } else if (resp.ok) {
+    } else if (resp.ok && !data.total) {
       result.className = 'test-result fail';
       result.textContent = 'No subscribed devices yet. Tap "Enable on this device" first.';
+    } else if (resp.ok) {
+      result.className = 'test-result fail';
+      result.textContent = 'Subscribed, but the push failed: ' + ((data.errors && data.errors[0]) || 'unknown error');
     } else {
       throw new Error('status ' + resp.status);
     }

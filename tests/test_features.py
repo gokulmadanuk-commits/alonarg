@@ -220,10 +220,10 @@ def test_detect_404(tmp_db_path, tmp_path, monkeypatch):
 
 
 def test_sync_calendar(tmp_db_path, tmp_path, monkeypatch):
-    from alonarg import outlook
+    from alonarg import calendars
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     rid = db.create_recording(status="done", title="Untitled recording")
-    monkeypatch.setattr(outlook, "find_event_for", lambda created_at, **k: {
+    monkeypatch.setattr(calendars, "find_event_for", lambda created_at, **k: {
         "subject": "Q3 Planning",
         "attendees": [{"name": "Jai", "email": "jai@acme.com"}, {"name": "Graham", "email": ""}],
     })
@@ -239,10 +239,10 @@ def test_sync_calendar(tmp_db_path, tmp_path, monkeypatch):
 
 
 def test_sync_calendar_no_match_keeps_title(tmp_db_path, tmp_path, monkeypatch):
-    from alonarg import outlook
+    from alonarg import calendars
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     rid = db.create_recording(status="done", title="Keep me")
-    monkeypatch.setattr(outlook, "find_event_for", lambda created_at, **k: None)
+    monkeypatch.setattr(calendars, "find_event_for", lambda created_at, **k: None)
     r = client.post(f"/api/recordings/{rid}/sync-calendar")
     assert r.status_code == 200 and r.json()["matched"] is False
     assert db.get_recording(rid)["title"] == "Keep me"
@@ -283,4 +283,38 @@ def test_push_subscribe_and_test(tmp_db_path, tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json() == {"ok": True}
     assert added["endpoint"] == "https://x/1"
     assert client.post("/api/push/test").json() == {"sent": 1, "removed": 0}
+    db.close()
+
+
+def test_graph_status(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import msgraph
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: False)
+    monkeypatch.setattr(msgraph, "account_name", lambda: None)
+    monkeypatch.setattr(msgraph, "login_pending", lambda: False)
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.get("/api/graph/status")
+    assert r.status_code == 200 and r.json()["signed_in"] is False
+    db.close()
+
+
+def test_graph_login(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import msgraph
+    monkeypatch.setattr(msgraph, "start_device_login", lambda: {
+        "user_code": "ABCD-EFGH", "verification_uri": "https://microsoft.com/devicelogin",
+        "message": "go", "expires_in": 900,
+    })
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.post("/api/graph/login")
+    assert r.status_code == 200 and r.json()["user_code"] == "ABCD-EFGH"
+    db.close()
+
+
+def test_graph_logout(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import msgraph
+    cleared = {}
+    monkeypatch.setattr(msgraph, "sign_out", lambda: cleared.setdefault("x", True))
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.post("/api/graph/logout")
+    assert r.status_code == 200 and r.json() == {"signed_in": False}
+    assert cleared.get("x")
     db.close()

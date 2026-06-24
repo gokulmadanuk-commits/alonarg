@@ -23,5 +23,8 @@ httpx
 # Web Push (meeting nudges to the phone PWA)
 pywebpush
 
+# Microsoft Graph calendar auth (works with "new Outlook" / M365)
+msal
+
 # Tests
 pytest
