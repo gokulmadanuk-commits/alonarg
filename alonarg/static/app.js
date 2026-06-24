@@ -401,23 +401,54 @@
 
   // ---- details sidebar (people / contacts) ----------------------------
   let _sideOriginal = null;
+  function _personRow(name) {
+    const row = document.createElement("div");
+    row.className = "detail-row person-row";
+    const input = document.createElement("input");
+    input.type = "text"; input.className = "row-input person-name"; input.placeholder = "Name"; input.value = name || "";
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.className = "row-remove"; rm.textContent = "×"; rm.title = "Remove";
+    rm.addEventListener("click", () => row.remove());
+    row.append(input, rm);
+    return row;
+  }
+  function _contactRow(c) {
+    c = c || {};
+    const row = document.createElement("div");
+    row.className = "detail-row contact-row";
+    const name = document.createElement("input");
+    name.type = "text"; name.className = "row-input c-name-in"; name.placeholder = "Name"; name.value = c.name || "";
+    const email = document.createElement("input");
+    email.type = "email"; email.className = "row-input c-email-in"; email.placeholder = "email@example.com"; email.value = c.email || "";
+    const phone = document.createElement("input");
+    phone.type = "text"; phone.className = "row-input c-phone-in"; phone.placeholder = "Phone"; phone.value = c.phone || "";
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.className = "row-remove"; rm.textContent = "× Remove"; rm.title = "Remove contact";
+    rm.addEventListener("click", () => row.remove());
+    row.append(name, email, phone, rm);
+    return row;
+  }
   function startDetailsEdit() {
     const body = document.getElementById("side-body");
     if (!body || body.dataset.editing) return;
     body.dataset.editing = "1";
     _sideOriginal = body.innerHTML;
     const m = window.ALONARG_META || {};
-    const contactsText = (m.contacts || [])
-      .map((c) => [c.name || "", c.email || "", c.phone || ""].join(", ").replace(/(,\s*)+$/, ""))
-      .join("\n");
     body.innerHTML =
-      '<div class="side-block"><h4>People <span class="muted">(one per line)</span></h4>' +
-      '<textarea id="edit-people" class="edit-area" rows="4"></textarea></div>' +
-      '<div class="side-block"><h4>Contacts <span class="muted">(Name, email, phone)</span></h4>' +
-      '<textarea id="edit-contacts" class="edit-area" rows="4" placeholder="Jai, jai@example.com, +1 555 123 4567"></textarea></div>' +
-      '<div class="side-edit-actions"><button id="save-details" class="btn btn-accent" type="button">Save</button><button id="cancel-details" class="btn" type="button">Cancel</button></div>';
-    document.getElementById("edit-people").value = (m.people || []).join("\n");
-    document.getElementById("edit-contacts").value = contactsText;
+      '<div class="side-block"><h4>People</h4><div id="people-rows"></div>' +
+      '<button type="button" class="btn btn-ghost add-row" id="add-person">+ Add person</button></div>' +
+      '<div class="side-block"><h4>Contacts</h4><div id="contacts-rows"></div>' +
+      '<button type="button" class="btn btn-ghost add-row" id="add-contact">+ Add contact</button></div>' +
+      '<div class="side-edit-actions"><button id="save-details" class="btn btn-accent" type="button">Save</button>' +
+      '<button id="cancel-details" class="btn" type="button">Cancel</button></div>';
+    const pr = document.getElementById("people-rows");
+    const people = m.people || [];
+    (people.length ? people : [""]).forEach((p) => pr.appendChild(_personRow(p)));
+    const cr = document.getElementById("contacts-rows");
+    const contacts = m.contacts || [];
+    (contacts.length ? contacts : [{}]).forEach((c) => cr.appendChild(_contactRow(c)));
+    document.getElementById("add-person").addEventListener("click", () => pr.appendChild(_personRow("")));
+    document.getElementById("add-contact").addEventListener("click", () => cr.appendChild(_contactRow({})));
     document.getElementById("cancel-details").addEventListener("click", cancelDetailsEdit);
     document.getElementById("save-details").addEventListener("click", saveDetailsEdit);
   }
@@ -425,23 +456,20 @@
     const body = document.getElementById("side-body");
     if (body && _sideOriginal != null) { body.innerHTML = _sideOriginal; delete body.dataset.editing; }
   }
-  function parseContacts(text) {
-    return text.split("\n").map((line) => {
-      const parts = line.split(",").map((s) => s.trim());
-      return { name: parts[0] || "", email: parts[1] || "", phone: parts.slice(2).join(", ").trim() };
-    }).filter((c) => c.name || c.email || c.phone);
-  }
   async function saveDetailsEdit() {
     const btn = document.getElementById("save-details");
     btn.disabled = true;
-    const payload = {
-      people: document.getElementById("edit-people").value.split("\n").map((s) => s.trim()).filter(Boolean),
-      contacts: parseContacts(document.getElementById("edit-contacts").value),
-    };
+    const people = Array.from(document.querySelectorAll("#people-rows .person-name"))
+      .map((i) => i.value.trim()).filter(Boolean);
+    const contacts = Array.from(document.querySelectorAll("#contacts-rows .contact-row")).map((row) => ({
+      name: row.querySelector(".c-name-in").value.trim(),
+      email: row.querySelector(".c-email-in").value.trim(),
+      phone: row.querySelector(".c-phone-in").value.trim(),
+    })).filter((c) => c.name || c.email || c.phone);
     const { ok } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/meta", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ people: people, contacts: contacts }),
     });
     if (ok) window.location.reload();
     else { btn.disabled = false; toast("Could not save details"); }
@@ -453,6 +481,20 @@
     const { ok } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/detect", { method: "POST" });
     if (ok) window.location.reload();
     else { btn.disabled = false; btn.textContent = orig; toast("Could not reach the local AI"); }
+  }
+  async function syncCalendar(btn) {
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = "Syncing…";
+    const { ok, body } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/sync-calendar", { method: "POST" });
+    if (ok && body && body.matched) {
+      window.location.reload();
+    } else if (ok && body && !body.matched) {
+      btn.disabled = false; btn.textContent = orig; toast("No Outlook event found for this time");
+    } else {
+      btn.disabled = false; btn.textContent = orig;
+      toast((body && body.detail) ? "Outlook not available" : "Sync failed");
+    }
   }
 
   // ---- edit title (detail page) ---------------------------------------
@@ -574,6 +616,8 @@
   if (editDetailsBtn) editDetailsBtn.addEventListener("click", startDetailsEdit);
   const detectBtn = document.getElementById("detect-btn");
   if (detectBtn) detectBtn.addEventListener("click", () => detectDetails(detectBtn));
+  const syncBtn = document.getElementById("sync-btn");
+  if (syncBtn) syncBtn.addEventListener("click", () => syncCalendar(syncBtn));
 
   formatStaticCells(document);
   authenticateAudio(document);

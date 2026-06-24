@@ -217,3 +217,39 @@ def test_detect_404(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     assert client.post("/api/recordings/999999/detect").status_code == 404
     db.close()
+
+
+def test_sync_calendar(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import outlook
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    rid = db.create_recording(status="done", title="Untitled recording")
+    monkeypatch.setattr(outlook, "find_event_for", lambda created_at, **k: {
+        "subject": "Q3 Planning",
+        "attendees": [{"name": "Jai", "email": "jai@acme.com"}, {"name": "Graham", "email": ""}],
+    })
+    r = client.post(f"/api/recordings/{rid}/sync-calendar")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["matched"] is True and body["title_updated"] is True
+    got = db.get_recording(rid)
+    assert got["title"] == "Q3 Planning"
+    assert "Jai" in got["meta"]["people"] and "Graham" in got["meta"]["people"]
+    assert {"name": "Jai", "email": "jai@acme.com", "phone": ""} in got["meta"]["contacts"]
+    db.close()
+
+
+def test_sync_calendar_no_match_keeps_title(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import outlook
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    rid = db.create_recording(status="done", title="Keep me")
+    monkeypatch.setattr(outlook, "find_event_for", lambda created_at, **k: None)
+    r = client.post(f"/api/recordings/{rid}/sync-calendar")
+    assert r.status_code == 200 and r.json()["matched"] is False
+    assert db.get_recording(rid)["title"] == "Keep me"
+    db.close()
+
+
+def test_sync_calendar_404(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    assert client.post("/api/recordings/999999/sync-calendar").status_code == 404
+    db.close()

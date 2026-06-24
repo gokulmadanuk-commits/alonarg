@@ -25,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from alonarg import assistant, audio_capture, config, ingest, pipeline
+from alonarg import assistant, audio_capture, config, ingest, outlook, pipeline
 from alonarg.db import Database
 from alonarg.types import SummaryResult
 
@@ -435,6 +435,44 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         merged = _merge_meta(rec.get("meta") or {}, detected)
         db.set_meta(rec_id, merged)
         return merged
+
+    @app.post("/api/recordings/{rec_id}/sync-calendar", dependencies=[Depends(require_auth)])
+    def api_sync_calendar(rec_id: int):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        try:
+            event = outlook.find_event_for(rec.get("created_at") or "")
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=503, detail=f"Could not read Outlook calendar: {exc}")
+        if not event:
+            return {"matched": False}
+        people: list[str] = []
+        contacts: list[dict] = []
+        for a in event.get("attendees", []) or []:
+            name = str(a.get("name", "")).strip()
+            email = str(a.get("email", "")).strip()
+            if name and name.lower() not in {p.lower() for p in people}:
+                people.append(name)
+            if name or email:
+                contacts.append({"name": name, "email": email, "phone": ""})
+        merged = _merge_meta(rec.get("meta") or {}, {"people": people, "contacts": contacts})
+        db.set_meta(rec_id, merged)
+        subject = str(event.get("subject", "")).strip()
+        cur_title = (rec.get("title") or "").strip()
+        title_updated = False
+        if subject and cur_title in ("", "Untitled recording", "Phone recording"):
+            db.update_recording(rec_id, title=subject)
+            title_updated = True
+        return {
+            "matched": True,
+            "subject": subject,
+            "attendees": len(contacts),
+            "title_updated": title_updated,
+            "meta": merged,
+        }
 
     @app.delete("/api/recordings/{rec_id}", dependencies=[Depends(require_auth)])
     def api_delete(rec_id: int):
