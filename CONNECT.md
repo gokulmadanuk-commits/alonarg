@@ -1,13 +1,12 @@
 # Connecting the phone PWA to your PC
 
 The phone app (**https://alonarg.vercel.app**) is just the front door. The actual
-transcription and the Claude-plan summarization run on **your PC** — that's the only way to
-honor "use my plan, not the API" (your Claude subscription is tied to this machine and can't
-run in the cloud). So the phone needs a way to reach your PC.
+transcription (Whisper) and summarization (a small **local LLM** via Ollama) run on **your PC**,
+where the models live. So the phone needs a way to reach your PC.
 
 ```
  📱 https://alonarg.vercel.app   ──HTTPS──►   🖥️ your PC : Alonarg engine (port 8765)
-   record + queue offline                       transcribe + claude summary + same dashboard
+   record + queue offline                       transcribe + local-LLM summary + same dashboard
 ```
 
 ## 1. Install the app on your phone (do this now, works offline)

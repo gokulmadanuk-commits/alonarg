@@ -76,28 +76,32 @@ Tests:
 ---
 
 ## Module: `alonarg/summarize.py`
-Summarize a transcript by driving the Claude Code CLI headlessly (uses the user's plan).
+Summarize a transcript with a small **local LLM** via Ollama's HTTP API (no API key, no
+subscription, fully offline). Config: `OLLAMA_HOST` (default `http://127.0.0.1:11434`),
+`OLLAMA_MODEL` (default `llama3.2:3b`), `OLLAMA_NUM_CTX` (default `8192`), `OLLAMA_TIMEOUT`.
 
-Mechanism (validated): `claude -p "<prompt>" --output-format json --max-turns 1` with the
-transcript piped via **stdin**. The stdout is an envelope JSON; the model's answer is in
-`["result"]`; that answer is itself JSON we asked for.
+Mechanism: POST `{OLLAMA_HOST}/api/chat` with `{"model", "messages":[{system},{user}],
+"stream": false, "format": "json", "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX}}`.
+`format:"json"` forces Ollama to return valid JSON. The model's answer is in
+`response["message"]["content"]` — itself the JSON object we asked for.
 
-- `build_prompt() -> str` — instruct the model: input transcript arrives via stdin; output
-  ONLY a JSON object with keys `title` (short), `summary` (concise paragraph(s)),
-  `action_items` (array of strings), `next_steps` (array of strings). No prose, no fences.
+- `build_prompt(transcript_text) -> tuple[str,str]` (or system+user strings) — instruct the model
+  to output ONLY a JSON object with keys `title` (short), `summary` (concise paragraph(s)),
+  `action_items` (array of strings), `next_steps` (array of strings).
 - `extract_json(text: str) -> dict` — robustly pull a JSON object from text: strip ```json fences,
   else find the first balanced `{...}`. Raises ValueError if none.  **Pure — unit-test.**
-- `parse_summary(claude_stdout: str) -> SummaryResult` — parse the envelope, check `is_error`,
-  take `result`, `extract_json`, build `SummaryResult`.  **Pure — unit-test with canned envelopes.**
-- `summarize(transcript_text: str, claude_bin: str | None = None, model: str | None = None, timeout: int = config.CLAUDE_TIMEOUT) -> SummaryResult`
-  — resolve binary (`config.resolve_claude_binary()`), run subprocess feeding `transcript_text`
-  on stdin, return `parse_summary(stdout)`. Raise a clear error on non-zero exit / `is_error`.
+- `parse_summary(ollama_response: dict) -> SummaryResult` — take `["message"]["content"]`,
+  `extract_json`, build `SummaryResult`.  **Pure — unit-test with canned response dicts.**
+- `summarize(transcript_text: str, model: str | None = None, host: str | None = None, timeout: int = config.OLLAMA_TIMEOUT) -> SummaryResult`
+  — POST to Ollama via httpx, raise a clear error if Ollama is unreachable (hint: start Ollama /
+  `ollama pull <model>`) or returns an error, else `parse_summary(response.json())`.
 
 Tests:
-- Unit: `extract_json` (raw, fenced, with surrounding prose, nested braces); `parse_summary`
-  with a realistic envelope `{"type":"result","is_error":false,"result":"{...}"}` and an error envelope.
-- Integration: real `summarize("Alice: we ship Friday. Bob: I'll email the client.")` and assert
-  non-empty title/summary and that action_items is a list. Mark `integration`.
+- Unit (monkeypatch `httpx.post`/Client): `extract_json` (raw, fenced, prose, nested braces);
+  `parse_summary` with a realistic `{"message":{"content":"{...}"}}` dict; `summarize` returns the
+  expected `SummaryResult` and posts to `/api/chat` with `format:"json"`; connection error raises a clear RuntimeError.
+- Integration: real `summarize("You: we ship Friday. Others: I'll email the client.")` against local
+  Ollama; assert non-empty title/summary and that action_items/next_steps are lists. Mark `integration`.
 
 ---
 

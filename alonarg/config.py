@@ -6,10 +6,7 @@ overridable via environment variables (``ALONARG_*``).
 """
 from __future__ import annotations
 
-import glob
 import os
-import re
-import shutil
 from pathlib import Path
 
 
@@ -38,9 +35,11 @@ WHISPER_MODEL = os.environ.get("ALONARG_MODEL", "small")
 WHISPER_DEVICE = os.environ.get("ALONARG_DEVICE", "cpu")
 WHISPER_COMPUTE = os.environ.get("ALONARG_COMPUTE", "int8")
 
-# --- Claude (headless CLI, uses the user's plan, NOT the API) ---
-CLAUDE_MODEL = os.environ.get("ALONARG_CLAUDE_MODEL", "")   # "" => CLI default
-CLAUDE_TIMEOUT = int(os.environ.get("ALONARG_CLAUDE_TIMEOUT", "300"))
+# --- Ollama (local LLM via HTTP API; no API key, no subscription, offline) ---
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "300"))
 
 # --- Server ---
 SERVER_HOST = os.environ.get("ALONARG_HOST", "127.0.0.1")
@@ -78,46 +77,3 @@ def ensure_dirs() -> None:
     for p in (DATA_DIR, RECORDINGS_DIR, MODELS_DIR):
         Path(p).mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HF_HOME", str(MODELS_DIR))
-
-
-def _version_key(path: str) -> tuple[int, int, int]:
-    matches = re.findall(r"(\d+)\.(\d+)\.(\d+)", path)
-    if not matches:
-        return (0, 0, 0)
-    return tuple(int(x) for x in matches[-1])  # type: ignore[return-value]
-
-
-def resolve_claude_binary() -> str:
-    """Locate the Claude Code CLI executable.
-
-    Resolution order: ALONARG_CLAUDE_BIN env -> PATH -> known install globs
-    (newest version wins). Raises FileNotFoundError if none found.
-    """
-    env = os.environ.get("ALONARG_CLAUDE_BIN")
-    if env and Path(env).exists():
-        return env
-
-    which = shutil.which("claude")
-    if which:
-        return which
-
-    home = Path.home()
-    localappdata = os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local"))
-    appdata = os.environ.get("APPDATA", str(home / "AppData" / "Roaming"))
-    patterns = [
-        str(home / ".vscode/extensions/anthropic.claude-code-*/resources/native-binary/claude.exe"),
-        str(Path(localappdata) / "Packages/Claude_*/LocalCache/Roaming/Claude/claude-code/*/claude.exe"),
-        str(Path(localappdata) / "Programs/claude/claude.exe"),
-        str(Path(appdata) / "npm/claude.cmd"),
-    ]
-    candidates: list[str] = []
-    for pat in patterns:
-        candidates.extend(glob.glob(pat))
-    candidates = [c for c in candidates if Path(c).exists()]
-    if not candidates:
-        raise FileNotFoundError(
-            "Could not locate the 'claude' CLI. Install Claude Code or set "
-            "ALONARG_CLAUDE_BIN to the full path of claude.exe."
-        )
-    candidates.sort(key=_version_key, reverse=True)
-    return candidates[0]

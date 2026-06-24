@@ -1,44 +1,45 @@
-"""Summarize a meeting transcript by driving the Claude Code CLI headlessly.
+"""Summarize a meeting transcript with a small local LLM via Ollama's HTTP API.
 
-This module shells out to the ``claude`` CLI in headless mode
-(``claude -p ... --output-format json --max-turns 1``) feeding the transcript on
-stdin. The CLI uses the user's Claude plan (NOT the paid API). The stdout is a
-JSON envelope whose ``result`` field holds the model's answer, which we instruct
-the model to make a single JSON object.
+This module POSTs the transcript to a locally running Ollama server
+(``{OLLAMA_HOST}/api/chat``) with ``format:"json"`` so the model is forced to
+return a single JSON object. The model's answer lives in
+``response["message"]["content"]`` and is itself the JSON object we asked for.
+No API key, no subscription, fully offline.
 
-Pure helpers (``build_prompt``, ``extract_json``, ``parse_summary``) are split out
-so they can be unit-tested without any subprocess/network.
+Pure helpers (``build_prompt``, ``extract_json``, ``parse_summary``) are split
+out so they can be unit-tested without any network call.
 """
 from __future__ import annotations
 
 import json
-import subprocess
+
+import httpx
 
 from alonarg import config
 from alonarg.types import SummaryResult
 
 
-def build_prompt() -> str:
-    """Instruction for the headless model.
+def build_prompt(transcript_text: str) -> tuple[str, str]:
+    """Build the (system_prompt, user_prompt) pair for the chat request.
 
-    Tells the model a meeting transcript will arrive on stdin and that it must
-    respond with ONLY a single JSON object (no markdown fences, no prose).
+    The system prompt instructs the model to summarize meeting transcripts and
+    to output ONLY a JSON object with exactly four keys. The user prompt carries
+    the transcript itself.
     """
-    return (
-        "You are a meeting-notes assistant. A meeting transcript will be provided "
-        "on standard input (stdin). Read the entire transcript and produce a "
-        "summary of the meeting.\n\n"
-        "Respond with ONLY a single JSON object and nothing else. Do not wrap it "
-        "in markdown code fences. Do not add any explanation, preamble, or trailing "
-        "text. The JSON object must have exactly these keys:\n"
+    system_prompt = (
+        "You are a meeting-notes assistant. You summarize meeting transcripts. "
+        "Respond with ONLY a single JSON object and nothing else -- no markdown "
+        "code fences, no explanation, no preamble or trailing text. The JSON "
+        "object must have exactly these keys:\n"
         '  "title": a short string naming the meeting.\n'
         '  "summary": a concise paragraph summarizing the meeting.\n'
         '  "action_items": an array of strings, each a concrete action item '
         "(empty array if none).\n"
         '  "next_steps": an array of strings describing follow-up next steps '
-        "(empty array if none).\n\n"
-        "Output the raw JSON object only."
+        "(empty array if none)."
     )
+    user_prompt = f"Transcript:\n{transcript_text}"
+    return system_prompt, user_prompt
 
 
 def extract_json(text: str) -> dict:
@@ -144,51 +145,68 @@ def _find_balanced_object(text: str) -> str | None:
     return None
 
 
-def parse_summary(claude_stdout: str) -> SummaryResult:
-    """Parse the Claude CLI JSON envelope into a ``SummaryResult``.
+def parse_summary(response: dict) -> SummaryResult:
+    """Parse an Ollama ``/api/chat`` response dict into a ``SummaryResult``.
 
-    Loads the envelope, raises ``RuntimeError`` if ``is_error`` is true, takes
-    the ``result`` field, extracts the JSON object from it, and builds the
-    ``SummaryResult``. Pure: no subprocess.
+    Reads ``response["message"]["content"]`` (the model's answer), extracts the
+    JSON object from it, and builds the ``SummaryResult``. Pure: no network.
+    Raises a clear error if the response shape is missing the expected fields.
     """
-    envelope = json.loads(claude_stdout)
-    if envelope.get("is_error"):
-        raise RuntimeError(envelope.get("result") or "claude error")
-    result_text = envelope["result"]
-    data = extract_json(result_text)
+    try:
+        content = response["message"]["content"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            "Ollama response missing 'message.content'; got: "
+            f"{response!r}"
+        ) from exc
+    data = extract_json(content)
     return SummaryResult.from_dict(data)
 
 
 def summarize(
     transcript_text: str,
-    claude_bin: str | None = None,
     model: str | None = None,
-    timeout: int = config.CLAUDE_TIMEOUT,
+    host: str | None = None,
+    timeout: int = config.OLLAMA_TIMEOUT,
 ) -> SummaryResult:
-    """Summarize ``transcript_text`` via the headless Claude CLI.
+    """Summarize ``transcript_text`` via a local Ollama model.
 
-    Resolves the CLI binary, runs it with the transcript piped on stdin, and
-    parses the resulting envelope into a ``SummaryResult``. Raises
-    ``RuntimeError`` on non-zero exit or an error envelope.
+    POSTs a chat request to ``{host}/api/chat`` with ``format:"json"`` so Ollama
+    returns valid JSON, then parses the response into a ``SummaryResult``.
+
+    Raises ``RuntimeError`` if Ollama is unreachable (with a hint to start it /
+    pull the model) or if it returns a non-200 status (including the response
+    body, which surfaces model-not-found and similar hints).
     """
-    bin = claude_bin or config.resolve_claude_binary()
-    model = model if model is not None else (config.CLAUDE_MODEL or None)
+    host = (host or config.OLLAMA_HOST).rstrip("/")
+    model = model or config.OLLAMA_MODEL
 
-    argv = [bin, "-p", build_prompt(), "--output-format", "json", "--max-turns", "1"]
-    if model:
-        argv.extend(["--model", model])
+    system_prompt, user_prompt = build_prompt(transcript_text)
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.2, "num_ctx": config.OLLAMA_NUM_CTX},
+    }
 
-    result = subprocess.run(
-        argv,
-        input=transcript_text,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        encoding="utf-8",
-    )
-    if result.returncode != 0:
+    url = f"{host}/api/chat"
+    try:
+        resp = httpx.post(url, json=payload, timeout=timeout)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise RuntimeError(
-            f"claude CLI exited with code {result.returncode}: "
-            f"{(result.stderr or '').strip()}"
+            f"Cannot reach Ollama at {host}. Start Ollama and run: "
+            f"ollama pull {model}"
+        ) from exc
+
+    if resp.status_code != 200:
+        body = (resp.text or "").strip()
+        raise RuntimeError(
+            f"Ollama returned HTTP {resp.status_code} from {url}: {body} "
+            f"(is the model '{model}' pulled? try: ollama pull {model})"
         )
-    return parse_summary(result.stdout)
+
+    return parse_summary(resp.json())

@@ -2,9 +2,9 @@
 
 A **local** meeting recorder, transcriber, and summarizer for Windows — like Granola,
 but everything runs on your PC. It captures your **microphone** and your **system audio**
-(WASAPI loopback), transcribes locally with Whisper, summarizes with **Claude using your
-existing plan** (via the Claude Code CLI, *not* the paid API), and shows everything in a
-local dashboard with summaries, action items, next steps, full transcripts, and audio playback.
+(WASAPI loopback), transcribes locally with Whisper, summarizes with a small **local LLM**
+(via [Ollama](https://ollama.com) — no API, no subscription, fully offline), and shows everything
+in a local dashboard with summaries, action items, next steps, full transcripts, and audio playback.
 
 ## What it does
 
@@ -12,9 +12,9 @@ local dashboard with summaries, action items, next steps, full transcripts, and 
    and system audio are captured on **separate tracks**.
 2. **Transcribe** — locally, with [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
    Your mic is labeled **You**, system audio is labeled **Others**.
-3. **Summarize** — the transcript is sent to Claude headlessly (`claude -p`), which returns a
-   title, a concise summary, **action items**, and **next steps**. This uses your Claude
-   subscription, not API credits.
+3. **Summarize** — the transcript is sent to a small local LLM (Ollama, default `llama3.2:3b`),
+   which returns a title, a concise summary, **action items**, and **next steps**. Runs entirely
+   on your machine — no API, no subscription.
 4. **Review** — a dashboard lists every recording with its summary and action items; open one
    to read the full transcript and play back the audio.
 
@@ -22,8 +22,8 @@ local dashboard with summaries, action items, next steps, full transcripts, and 
 
 - Windows 10/11
 - Python 3.14 (the project was built and tested on 3.14.5)
-- [Claude Code](https://claude.com/claude-code) installed and signed in (the `claude` CLI;
-  Alonarg auto-locates it, including the VS Code extension's bundled binary)
+- [Ollama](https://ollama.com) installed (auto-runs as a background service on `localhost:11434`)
+  with a small model pulled: `ollama pull llama3.2:3b` (~2 GB)
 - ~500 MB free for the Whisper "small" model (downloaded once, on first transcription)
 
 ## Setup
@@ -52,6 +52,14 @@ the system tray, and registers the global hotkey.
 - **Dashboard:** a Record button with a live timer; cards update through
   `recording → transcribing → summarizing → done` on their own.
 
+### Always-on (optional)
+Run the engine headless at logon so it keeps working while the screen is locked:
+```powershell
+.\install-autostart.ps1        # remove with: .\install-autostart.ps1 -Remove
+```
+Ollama already auto-starts as a background service. Keep the laptop from sleeping for
+uninterrupted processing (Windows Settings → Power).
+
 ## Phone companion (PWA)
 
 An installable, offline-first phone app lets you record **in-person** meetings and run them
@@ -59,7 +67,7 @@ through the same pipeline and dashboard. It's live at **https://alonarg.vercel.a
 Vercel; source in `pwa/`).
 
 - Open it on your phone and **Add to Home Screen**. You can record and queue meetings offline.
-- The heavy lifting (transcription + your Claude-plan summary) stays on your PC, so the phone
+- The heavy lifting (transcription + local-LLM summary) stays on your PC, so the phone
   uploads recordings to your PC's engine over a secure tunnel and reads back the same dashboard.
 - One command on the PC sets this up: **`.\connect.ps1`** — see **[CONNECT.md](CONNECT.md)** for
   the full walkthrough (tunnel + token + PWA settings).
@@ -78,7 +86,7 @@ exactly as before.
                           mixed.wav (playback)              TranscriptResult
                                                                       │
                                                                       ▼
-                                              summarize  →  claude -p (your plan)
+                                              summarize  →  local LLM (Ollama)
                                                                       │
                                                                       ▼
                                    SQLite (db)  ◄── pipeline ──►  SummaryResult
@@ -99,8 +107,9 @@ the full contract of each.
 | `ALONARG_MODEL` | `small` | Whisper model (`tiny`/`base`/`small`/`medium`/`large-v3`) |
 | `ALONARG_DEVICE` | `cpu` | `cpu` or `cuda` (GPU; also set `ALONARG_COMPUTE=float16`) |
 | `ALONARG_COMPUTE` | `int8` | ctranslate2 compute type |
-| `ALONARG_CLAUDE_BIN` | auto | full path to `claude.exe` if auto-detect fails |
-| `ALONARG_CLAUDE_MODEL` | CLI default | e.g. `claude-sonnet-4-6` to pick a model for summaries |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama API endpoint |
+| `OLLAMA_MODEL` | `llama3.2:3b` | local summary model (e.g. `qwen2.5:3b`, `llama3.1:8b`) |
+| `OLLAMA_NUM_CTX` | `8192` | context window for long transcripts |
 | `ALONARG_HOTKEY` | `ctrl+alt+r` | global record toggle |
 | `ALONARG_HOST` / `ALONARG_PORT` | `127.0.0.1` / `8765` | dashboard address |
 
@@ -108,7 +117,7 @@ the full contract of each.
 
 `%LOCALAPPDATA%\Alonarg\` — `alonarg.db` (metadata, transcripts, summaries),
 `recordings\<id>\` (`mic.wav`, `system.wav`, `mixed.wav`), and `models\` (Whisper cache).
-Nothing leaves your machine except the transcript text sent to Claude for summarization.
+Nothing leaves your machine — transcription and summarization both run locally.
 
 ## Tests
 
@@ -117,13 +126,14 @@ Nothing leaves your machine except the transcript text sent to Claude for summar
 & "$env:LOCALAPPDATA\Alonarg\venv\Scripts\python.exe" -m pytest -m "not integration"   # fast, no hardware/model/CLI
 ```
 
-Integration tests exercise real audio devices, the real Whisper model, and a real `claude` call.
+Integration tests exercise real audio devices, the real Whisper model, and a real local-LLM (Ollama) call.
 
 ## Troubleshooting
 
 - **No system audio captured:** make sure something is actually playing and the output volume
   isn't muted; loopback captures the **default** output device.
-- **`claude` not found:** set `ALONARG_CLAUDE_BIN` to your `claude.exe`.
+- **Summaries fail / connection refused:** ensure Ollama is running (`ollama list`) and the
+  model is pulled (`ollama pull llama3.2:3b`).
 - **Transcription slow:** use a smaller model (`ALONARG_MODEL=base`) or a GPU
   (`ALONARG_DEVICE=cuda ALONARG_COMPUTE=float16`).
 - **Hotkey not working:** another app may own `Ctrl+Alt+R`; change `ALONARG_HOTKEY`.
