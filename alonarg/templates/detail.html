@@ -30,6 +30,7 @@
     </div>
 
     <div class="detail-toolbar">
+      <button id="edit-notes" class="btn" type="button">Edit notes</button>
       <button id="copy-notes" class="btn" type="button">Copy notes</button>
       <button id="download-notes" class="btn" type="button">Download .md</button>
     </div>
@@ -51,60 +52,109 @@
     </section>
     {% endif %}
 
-    <section class="panel ask-panel">
-      <h3>Ask about this meeting</h3>
-      <div class="ask-row">
-        <input id="ask-input" class="ask-input" type="text" placeholder="e.g. What did we decide? What are my action items?" />
-        <button id="ask-btn" class="btn btn-accent" type="button">Ask</button>
-      </div>
-      <div id="ask-answer" class="ask-answer" hidden></div>
-    </section>
-
     {% set summary = rec.summary %}
-    <section class="panel">
-      <h3>Summary</h3>
-      {% if summary and summary.summary %}
-        <p class="summary-text">{{ summary.summary }}</p>
-      {% else %}
-        <p class="muted">No summary yet.</p>
-      {% endif %}
-    </section>
+    <div class="detail-layout">
+      <div class="detail-main">
+        <section class="panel ask-panel">
+          <h3>Ask about this meeting</h3>
+          <div class="ask-row">
+            <input id="ask-input" class="ask-input" type="text" placeholder="e.g. What did we decide? What are my action items?" />
+            <button id="ask-btn" class="btn btn-accent" type="button">Ask</button>
+          </div>
+          <div id="ask-answer" class="ask-answer" hidden></div>
+        </section>
 
-    <section class="panel">
-      <h3>Action items</h3>
-      {% if summary and summary.action_items %}
-        <ul class="bullet-list" id="action-items">
-          {% for item in summary.action_items %}<li class="action-item"><span class="ai-text">{{ item }}</span></li>{% endfor %}
-        </ul>
-      {% else %}
-        <p class="muted">None.</p>
-      {% endif %}
-    </section>
+        <div id="notes-region">
+          <section class="panel">
+            <h3>Summary</h3>
+            {% if summary and summary.summary %}
+              <p class="summary-text" id="summary-text">{{ summary.summary }}</p>
+            {% else %}
+              <p class="muted" id="summary-text">No summary yet.</p>
+            {% endif %}
+          </section>
 
-    <section class="panel">
-      <h3>Next steps</h3>
-      {% if summary and summary.next_steps %}
-        <ul class="bullet-list" id="next-steps">
-          {% for item in summary.next_steps %}<li>{{ item }}</li>{% endfor %}
-        </ul>
-      {% else %}
-        <p class="muted">None.</p>
-      {% endif %}
-    </section>
+          <section class="panel">
+            <h3>Action items</h3>
+            {% if summary and summary.action_items %}
+              <ul class="bullet-list" id="action-items">
+                {% for item in summary.action_items %}<li class="action-item"><span class="ai-text">{{ item }}</span></li>{% endfor %}
+              </ul>
+            {% else %}
+              <p class="muted">None.</p>
+            {% endif %}
+          </section>
 
-    <section class="panel">
-      <details class="transcript">
-        <summary>Full transcript</summary>
-        {% if rec.transcript and rec.transcript.text %}
-          <pre class="transcript-text">{{ rec.transcript.text }}</pre>
-        {% else %}
-          <p class="muted">No transcript available.</p>
-        {% endif %}
-      </details>
-    </section>
+          <section class="panel">
+            <h3>Next steps</h3>
+            {% if summary and summary.next_steps %}
+              <ul class="bullet-list" id="next-steps">
+                {% for item in summary.next_steps %}<li class="ns-item"><span class="ai-text">{{ item }}</span></li>{% endfor %}
+              </ul>
+            {% else %}
+              <p class="muted">None.</p>
+            {% endif %}
+          </section>
+        </div>
+
+        <section class="panel">
+          <details class="transcript">
+            <summary>Full transcript</summary>
+            {% if rec.transcript and rec.transcript.text %}
+              <pre class="transcript-text">{{ rec.transcript.text }}</pre>
+            {% else %}
+              <p class="muted">No transcript available.</p>
+            {% endif %}
+          </details>
+        </section>
+      </div>
+
+      <aside class="detail-side">
+        <section class="panel side-panel">
+          <div class="side-head">
+            <h3>Details</h3>
+            <div class="side-actions">
+              <button id="detect-btn" class="btn btn-ghost" type="button" title="Infer people &amp; contacts from the transcript">Detect</button>
+              <button id="edit-details-btn" class="btn btn-ghost" type="button">Edit</button>
+            </div>
+          </div>
+          <div id="side-body">
+            <div class="side-block">
+              <h4>People</h4>
+              {% if rec.meta and rec.meta.people %}
+                <ul class="side-list">{% for p in rec.meta.people %}<li>{{ p }}</li>{% endfor %}</ul>
+              {% else %}
+                <p class="muted">None yet &mdash; tap <strong>Detect</strong> or <strong>Edit</strong>.</p>
+              {% endif %}
+            </div>
+            <div class="side-block">
+              <h4>Contacts</h4>
+              {% if rec.meta and rec.meta.contacts %}
+                <ul class="side-list contacts">
+                  {% for c in rec.meta.contacts %}
+                  <li>
+                    {% if c.name %}<span class="c-name">{{ c.name }}</span>{% endif %}
+                    {% if c.email %}<a class="c-email" href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}
+                    {% if c.phone %}<span class="c-phone">{{ c.phone }}</span>{% endif %}
+                  </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="muted">None yet.</p>
+              {% endif %}
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
   </main>
 
-  <script>window.ALONARG_TOKEN={{ token|tojson }};</script>
+  <script>
+    window.ALONARG_TOKEN = {{ token|tojson }};
+    window.ALONARG_REC_ID = {{ rec.id|tojson }};
+    window.ALONARG_SUMMARY = {{ (rec.summary or {"summary": "", "action_items": [], "next_steps": []}) | tojson }};
+    window.ALONARG_META = {{ (rec.meta or {"people": [], "contacts": []}) | tojson }};
+  </script>
   <script src="/static/app.js"></script>
 </body>
 </html>

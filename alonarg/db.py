@@ -32,6 +32,7 @@ _UPDATABLE_COLUMNS = frozenset(
         "mixed_path",
         "transcript_json",
         "summary_json",
+        "meta_json",
         "created_at",
     }
 )
@@ -63,7 +64,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     system_path     TEXT,
     mixed_path      TEXT,
     transcript_json TEXT,
-    summary_json    TEXT
+    summary_json    TEXT,
+    meta_json       TEXT
 );
 """
 
@@ -100,6 +102,10 @@ class Database:
     def _create_schema(self) -> None:
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            # Migrate older databases that predate newer columns.
+            existing = {row[1] for row in self._conn.execute("PRAGMA table_info(recordings)")}
+            if "meta_json" not in existing:
+                self._conn.execute("ALTER TABLE recordings ADD COLUMN meta_json TEXT")
             self._conn.commit()
 
     # --- writes -----------------------------------------------------------
@@ -171,6 +177,10 @@ class Database:
         """Store a summary as JSON in the recording's ``summary_json``."""
         self.update_recording(rec_id, summary_json=json.dumps(summary.to_dict()))
 
+    def set_meta(self, rec_id: int, meta: dict) -> None:
+        """Store call metadata (people, contacts, ...) as JSON in ``meta_json``."""
+        self.update_recording(rec_id, meta_json=json.dumps(meta))
+
     def delete_recording(self, rec_id: int) -> bool:
         """Delete a recording. Return True if a row was removed."""
         with self._lock:
@@ -192,6 +202,7 @@ class Database:
         record = dict(row)
         record["transcript"] = _loads_or_none(record.get("transcript_json"))
         record["summary"] = _loads_or_none(record.get("summary_json"))
+        record["meta"] = _loads_or_none(record.get("meta_json"))
         return record
 
     def list_recordings(self) -> list[dict]:

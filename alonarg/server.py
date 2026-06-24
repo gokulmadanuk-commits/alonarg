@@ -27,6 +27,7 @@ from starlette.responses import FileResponse
 
 from alonarg import assistant, audio_capture, config, ingest, pipeline
 from alonarg.db import Database
+from alonarg.types import SummaryResult
 
 log = logging.getLogger(__name__)
 
@@ -148,6 +149,45 @@ def _global_context(db, budget: int = 12000) -> tuple[str, list[int]]:
         used.append(rec["id"])
         total += len(block)
     return "\n".join(chunks), used
+
+
+def _clean_list(items) -> list[str]:
+    """Strip and drop blank entries from a list of strings."""
+    return [s.strip() for s in (items or []) if isinstance(s, str) and s.strip()]
+
+
+def _clean_contacts(items) -> list[dict]:
+    """Normalize contacts to {name, email, phone}, dropping fully-empty rows."""
+    out: list[dict] = []
+    for c in items or []:
+        if not isinstance(c, dict):
+            continue
+        entry = {
+            "name": str(c.get("name", "")).strip(),
+            "email": str(c.get("email", "")).strip(),
+            "phone": str(c.get("phone", "")).strip(),
+        }
+        if entry["name"] or entry["email"] or entry["phone"]:
+            out.append(entry)
+    return out
+
+
+def _merge_meta(current: dict, detected: dict) -> dict:
+    """Union detected people/contacts into existing meta without losing edits."""
+    people = list(current.get("people", []) or [])
+    seen_p = {p.lower() for p in people}
+    for p in detected.get("people", []) or []:
+        if p.lower() not in seen_p:
+            people.append(p)
+            seen_p.add(p.lower())
+    contacts = _clean_contacts(current.get("contacts", []))
+    seen_c = {(c["name"].lower(), c["email"].lower()) for c in contacts}
+    for c in _clean_contacts(detected.get("contacts", [])):
+        key = (c["name"].lower(), c["email"].lower())
+        if key not in seen_c:
+            contacts.append(c)
+            seen_c.add(key)
+    return {"people": people, "contacts": contacts}
 
 
 def require_auth(request: Request) -> None:
@@ -339,6 +379,62 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             raise HTTPException(status_code=400, detail="Title cannot be empty")
         db.update_recording(rec_id, title=new_title)
         return {"id": rec_id, "title": new_title}
+
+    @app.put("/api/recordings/{rec_id}/summary", dependencies=[Depends(require_auth)])
+    def api_update_summary(
+        rec_id: int,
+        summary: str | None = Body(default=None),
+        action_items: list[str] | None = Body(default=None),
+        next_steps: list[str] | None = Body(default=None),
+    ):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        cur = rec.get("summary") or {}
+        merged = SummaryResult(
+            title=cur.get("title", ""),
+            summary=cur.get("summary", "") if summary is None else summary.strip(),
+            action_items=list(cur.get("action_items", []))
+            if action_items is None
+            else _clean_list(action_items),
+            next_steps=list(cur.get("next_steps", []))
+            if next_steps is None
+            else _clean_list(next_steps),
+        )
+        db.set_summary(rec_id, merged)
+        return merged.to_dict()
+
+    @app.put("/api/recordings/{rec_id}/meta", dependencies=[Depends(require_auth)])
+    def api_update_meta(
+        rec_id: int,
+        people: list[str] | None = Body(default=None),
+        contacts: list[dict] | None = Body(default=None),
+    ):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        cur = rec.get("meta") or {}
+        meta = {
+            "people": _clean_list(people) if people is not None else list(cur.get("people", []) or []),
+            "contacts": _clean_contacts(contacts) if contacts is not None else _clean_contacts(cur.get("contacts", [])),
+        }
+        db.set_meta(rec_id, meta)
+        return meta
+
+    @app.post("/api/recordings/{rec_id}/detect", dependencies=[Depends(require_auth)])
+    def api_detect(rec_id: int):
+        rec = db.get_recording(rec_id)
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        transcript = (rec.get("transcript") or {}).get("text", "")
+        summary = (rec.get("summary") or {}).get("summary", "")
+        try:
+            detected = assistant.extract_details(transcript, summary)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        merged = _merge_meta(rec.get("meta") or {}, detected)
+        db.set_meta(rec_id, merged)
+        return merged
 
     @app.delete("/api/recordings/{rec_id}", dependencies=[Depends(require_auth)])
     def api_delete(rec_id: int):

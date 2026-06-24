@@ -53,3 +53,33 @@ def test_draft_email_error_status(monkeypatch):
     monkeypatch.setattr(assistant.httpx, "post", lambda *a, **k: _Resp("nope", status=500))
     with pytest.raises(RuntimeError):
         assistant.draft_email("do thing")
+
+
+def test_extract_details_parses_and_regex(monkeypatch):
+    def fake_post(url, json=None, timeout=None):
+        return _Resp('{"people": ["Jai (client)"], "contacts": [{"name":"Jai","email":"jai@acme.com","phone":""}]}')
+
+    monkeypatch.setattr(assistant.httpx, "post", fake_post)
+    out = assistant.extract_details("Please email me at bob@beta.io after.", "summary")
+    assert out["people"] == ["Jai (client)"]
+    emails = {c["email"] for c in out["contacts"]}
+    assert "jai@acme.com" in emails        # from the model
+    assert "bob@beta.io" in emails         # regex backstop from the transcript text
+
+
+def test_extract_details_drops_generic_people(monkeypatch):
+    monkeypatch.setattr(
+        assistant.httpx, "post",
+        lambda *a, **k: _Resp('{"people": ["You", "Others (client)", "Jai", "the team"], "contacts": []}'),
+    )
+    out = assistant.extract_details("hello")
+    assert out["people"] == ["Jai"]
+
+
+def test_extract_details_connection_error(monkeypatch):
+    def boom(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(assistant.httpx, "post", boom)
+    with pytest.raises(RuntimeError):
+        assistant.extract_details("text")

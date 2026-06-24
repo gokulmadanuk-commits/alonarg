@@ -304,10 +304,11 @@
     const main = document.querySelector(".detail");
     if (!main) return;
     const recId = main.getAttribute("data-rec-id");
-    document.querySelectorAll("#action-items .action-item").forEach((li) => {
+    document.querySelectorAll("#action-items .action-item, #next-steps .ns-item").forEach((li) => {
       const span = li.querySelector(".ai-text");
       const text = span ? span.textContent.trim() : "";
       if (!text || !EMAIL_RE.test(text)) return;
+      if (li.querySelector(".draft-email-btn")) return;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-ghost draft-email-btn";
@@ -352,6 +353,106 @@
     actions.className = "email-actions";
     actions.append(copy, open);
     box.append(s, pre, actions);
+  }
+
+  // ---- edit notes (summary / action items / next steps) ----------------
+  let _notesOriginal = null;
+  function startNotesEdit() {
+    const region = document.getElementById("notes-region");
+    if (!region || region.dataset.editing) return;
+    region.dataset.editing = "1";
+    _notesOriginal = region.innerHTML;
+    const s = window.ALONARG_SUMMARY || {};
+    region.innerHTML =
+      '<section class="panel"><h3>Summary</h3><textarea id="edit-summary" class="edit-area" rows="4"></textarea></section>' +
+      '<section class="panel"><h3>Action items <span class="muted">(one per line)</span></h3><textarea id="edit-actions" class="edit-area" rows="4"></textarea></section>' +
+      '<section class="panel"><h3>Next steps <span class="muted">(one per line)</span></h3><textarea id="edit-next" class="edit-area" rows="3"></textarea></section>' +
+      '<div class="notes-edit-actions"><button id="save-notes" class="btn btn-accent" type="button">Save</button><button id="cancel-notes" class="btn" type="button">Cancel</button></div>';
+    document.getElementById("edit-summary").value = s.summary || "";
+    document.getElementById("edit-actions").value = (s.action_items || []).join("\n");
+    document.getElementById("edit-next").value = (s.next_steps || []).join("\n");
+    document.getElementById("cancel-notes").addEventListener("click", cancelNotesEdit);
+    document.getElementById("save-notes").addEventListener("click", saveNotesEdit);
+  }
+  function cancelNotesEdit() {
+    const region = document.getElementById("notes-region");
+    if (region && _notesOriginal != null) { region.innerHTML = _notesOriginal; delete region.dataset.editing; }
+    setupEmailDrafts();
+  }
+  function linesOf(id) {
+    return document.getElementById(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+  async function saveNotesEdit() {
+    const saveBtn = document.getElementById("save-notes");
+    saveBtn.disabled = true;
+    const payload = {
+      summary: document.getElementById("edit-summary").value,
+      action_items: linesOf("edit-actions"),
+      next_steps: linesOf("edit-next"),
+    };
+    const { ok } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/summary", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (ok) window.location.reload();
+    else { saveBtn.disabled = false; toast("Could not save notes"); }
+  }
+
+  // ---- details sidebar (people / contacts) ----------------------------
+  let _sideOriginal = null;
+  function startDetailsEdit() {
+    const body = document.getElementById("side-body");
+    if (!body || body.dataset.editing) return;
+    body.dataset.editing = "1";
+    _sideOriginal = body.innerHTML;
+    const m = window.ALONARG_META || {};
+    const contactsText = (m.contacts || [])
+      .map((c) => [c.name || "", c.email || "", c.phone || ""].join(", ").replace(/(,\s*)+$/, ""))
+      .join("\n");
+    body.innerHTML =
+      '<div class="side-block"><h4>People <span class="muted">(one per line)</span></h4>' +
+      '<textarea id="edit-people" class="edit-area" rows="4"></textarea></div>' +
+      '<div class="side-block"><h4>Contacts <span class="muted">(Name, email, phone)</span></h4>' +
+      '<textarea id="edit-contacts" class="edit-area" rows="4" placeholder="Jai, jai@example.com, +1 555 123 4567"></textarea></div>' +
+      '<div class="side-edit-actions"><button id="save-details" class="btn btn-accent" type="button">Save</button><button id="cancel-details" class="btn" type="button">Cancel</button></div>';
+    document.getElementById("edit-people").value = (m.people || []).join("\n");
+    document.getElementById("edit-contacts").value = contactsText;
+    document.getElementById("cancel-details").addEventListener("click", cancelDetailsEdit);
+    document.getElementById("save-details").addEventListener("click", saveDetailsEdit);
+  }
+  function cancelDetailsEdit() {
+    const body = document.getElementById("side-body");
+    if (body && _sideOriginal != null) { body.innerHTML = _sideOriginal; delete body.dataset.editing; }
+  }
+  function parseContacts(text) {
+    return text.split("\n").map((line) => {
+      const parts = line.split(",").map((s) => s.trim());
+      return { name: parts[0] || "", email: parts[1] || "", phone: parts.slice(2).join(", ").trim() };
+    }).filter((c) => c.name || c.email || c.phone);
+  }
+  async function saveDetailsEdit() {
+    const btn = document.getElementById("save-details");
+    btn.disabled = true;
+    const payload = {
+      people: document.getElementById("edit-people").value.split("\n").map((s) => s.trim()).filter(Boolean),
+      contacts: parseContacts(document.getElementById("edit-contacts").value),
+    };
+    const { ok } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/meta", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (ok) window.location.reload();
+    else { btn.disabled = false; toast("Could not save details"); }
+  }
+  async function detectDetails(btn) {
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = "Detecting…";
+    const { ok } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/detect", { method: "POST" });
+    if (ok) window.location.reload();
+    else { btn.disabled = false; btn.textContent = orig; toast("Could not reach the local AI"); }
   }
 
   // ---- edit title (detail page) ---------------------------------------
@@ -463,8 +564,16 @@
     downloadText(safe + ".md", buildNotes());
   });
 
-  // email drafts on email-like action items (detail)
+  // email drafts on email-like action items + next steps (detail)
   setupEmailDrafts();
+
+  // edit notes + details sidebar (detail)
+  const editNotesBtn = document.getElementById("edit-notes");
+  if (editNotesBtn) editNotesBtn.addEventListener("click", startNotesEdit);
+  const editDetailsBtn = document.getElementById("edit-details-btn");
+  if (editDetailsBtn) editDetailsBtn.addEventListener("click", startDetailsEdit);
+  const detectBtn = document.getElementById("detect-btn");
+  if (detectBtn) detectBtn.addEventListener("click", () => detectDetails(detectBtn));
 
   formatStaticCells(document);
   authenticateAudio(document);

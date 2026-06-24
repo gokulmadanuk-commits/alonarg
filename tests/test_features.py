@@ -138,3 +138,82 @@ def test_draft_email_empty_400(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     assert client.post("/api/draft-email", json={"item": "   "}).status_code == 400
     db.close()
+
+
+def test_update_summary_full(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    r = client.put(f"/api/recordings/{a}/summary",
+                   json={"summary": "Edited.", "action_items": ["A", " B "], "next_steps": ["C"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["summary"] == "Edited."
+    assert body["action_items"] == ["A", "B"]
+    assert body["next_steps"] == ["C"]
+    assert body["title"] == "Pricing discussion"  # title preserved
+    got = db.get_recording(a)["summary"]
+    assert got["summary"] == "Edited." and got["action_items"] == ["A", "B"]
+    db.close()
+
+
+def test_update_summary_partial(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    r = client.put(f"/api/recordings/{a}/summary", json={"action_items": ["only"]})
+    assert r.status_code == 200
+    got = db.get_recording(a)["summary"]
+    assert got["summary"] == "We set the price at $99."  # unchanged
+    assert got["action_items"] == ["only"]
+    db.close()
+
+
+def test_update_summary_404(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    assert client.put("/api/recordings/999999/summary", json={"summary": "x"}).status_code == 404
+    db.close()
+
+
+def test_update_meta_cleans(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    r = client.put(f"/api/recordings/{a}/meta", json={
+        "people": ["Jai", "  ", "Graham"],
+        "contacts": [{"name": "Jai", "email": "jai@x.com", "phone": ""},
+                     {"name": "", "email": "", "phone": ""}],
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["people"] == ["Jai", "Graham"]
+    assert body["contacts"] == [{"name": "Jai", "email": "jai@x.com", "phone": ""}]
+    assert db.get_recording(a)["meta"]["people"] == ["Jai", "Graham"]
+    db.close()
+
+
+def test_update_meta_404(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    assert client.put("/api/recordings/999999/meta", json={"people": ["x"]}).status_code == 404
+    db.close()
+
+
+def test_detect_merges_and_saves(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    db.set_meta(a, {"people": ["Existing"], "contacts": []})
+    monkeypatch.setattr(
+        assistant, "extract_details",
+        lambda tr, summ="", **k: {"people": ["Detected"],
+                                  "contacts": [{"name": "D", "email": "d@x.com", "phone": ""}]},
+    )
+    r = client.post(f"/api/recordings/{a}/detect")
+    assert r.status_code == 200
+    body = r.json()
+    assert "Existing" in body["people"] and "Detected" in body["people"]
+    assert body["contacts"] == [{"name": "D", "email": "d@x.com", "phone": ""}]
+    assert "Detected" in db.get_recording(a)["meta"]["people"]
+    db.close()
+
+
+def test_detect_404(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    assert client.post("/api/recordings/999999/detect").status_code == 404
+    db.close()
