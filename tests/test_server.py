@@ -186,6 +186,10 @@ def test_dashboard_renders(ctx):
     assert "text/html" in r.headers["content-type"]
     assert "Alonarg" in r.text
     assert "Rendered Meeting" in r.text
+    # left-nav shell with the three views
+    assert 'class="sidebar"' in r.text
+    for view in ("recordings", "calendar", "settings"):
+        assert f'data-view="{view}"' in r.text
 
 
 def test_detail_page(ctx):

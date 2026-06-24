@@ -154,6 +154,7 @@ def _to_event(item: dict) -> dict:
         attendees.append({"name": ea.get("name", ""), "email": ea.get("address", "")})
     resp = (item.get("responseStatus") or {}).get("response") or ""
     return {
+        "id": item.get("id", ""),
         "subject": item.get("subject", ""),
         "start": _iso((item.get("start") or {}).get("dateTime")),
         "end": _iso((item.get("end") or {}).get("dateTime")),
@@ -172,7 +173,7 @@ def read_events_window(start: datetime, end: datetime) -> list[dict]:
     params = {
         "startDateTime": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "endDateTime": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "$select": "subject,start,end,attendees,isAllDay,responseStatus,organizer",
+        "$select": "id,subject,start,end,attendees,isAllDay,responseStatus,organizer",
         "$orderby": "start/dateTime",
         "$top": "50",
     }

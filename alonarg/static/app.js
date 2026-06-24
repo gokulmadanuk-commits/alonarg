@@ -206,6 +206,142 @@
     toast("Calendar disconnected");
   }
 
+  // ---- left-nav view switching (recordings / calendar / settings) ------
+  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", settings: "Settings" };
+  function currentView() {
+    const h = (location.hash || "").replace("#", "");
+    return VIEW_TITLES[h] ? h : "recordings";
+  }
+  function showView(name) {
+    document.querySelectorAll(".view[data-view]").forEach((s) => { s.hidden = s.dataset.view !== name; });
+    document.querySelectorAll(".nav-link[data-view]").forEach((a) => { a.classList.toggle("active", a.dataset.view === name); });
+    const t = document.getElementById("view-title");
+    if (t) t.textContent = VIEW_TITLES[name] || "Recordings";
+    if (name === "calendar") loadCalendar();
+    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); }
+  }
+
+  // ---- calendar week view + auto-record toggles -----------------------
+  let _calEvents = {};
+  function dayKey(d) { return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+  function fmtTimeRange(ev) {
+    const s = new Date(ev.start), e = new Date(ev.end);
+    const opt = { hour: "2-digit", minute: "2-digit" };
+    const ss = isNaN(s.getTime()) ? "" : s.toLocaleTimeString(undefined, opt);
+    const ee = isNaN(e.getTime()) ? "" : e.toLocaleTimeString(undefined, opt);
+    return ss + (ee ? " – " + ee : "");
+  }
+  async function loadCalendar() {
+    const body = document.getElementById("calendar-body");
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading your calendar…</p>';
+    const { ok, body: data } = await jsonFetch("/api/calendar/events?days=7");
+    if (!ok || !data) {
+      body.innerHTML = '<p class="ask-answer error">Could not load the calendar. Make sure the engine is running.</p>';
+      return;
+    }
+    if (!data.connected) {
+      body.innerHTML =
+        '<div class="empty-state"><p>Calendar not connected.</p>' +
+        '<p class="muted">Connect it in <a href="/#settings">Settings</a> to see your meetings here and have Alonarg auto-record them.</p></div>';
+      return;
+    }
+    renderCalendar(data.events || []);
+  }
+  function renderCalendar(events) {
+    const body = document.getElementById("calendar-body");
+    _calEvents = {};
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(today); d.setDate(today.getDate() + i); days.push(d); }
+    const byDay = {};
+    events.forEach((ev) => {
+      _calEvents[ev.key] = ev;
+      const start = new Date(ev.start);
+      if (isNaN(start.getTime())) return;
+      const k = dayKey(start);
+      (byDay[k] = byDay[k] || []).push(ev);
+    });
+    const grid = document.createElement("div");
+    grid.className = "calendar-grid";
+    days.forEach((d, idx) => {
+      const col = document.createElement("div");
+      col.className = "cal-col";
+      const head = document.createElement("div");
+      head.className = "cal-day-head" + (idx === 0 ? " today" : "");
+      head.innerHTML =
+        '<span class="cal-dow">' + d.toLocaleDateString(undefined, { weekday: "short" }) + "</span>" +
+        '<span class="cal-date">' + (idx === 0 ? "Today" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" })) + "</span>";
+      col.appendChild(head);
+      const list = byDay[dayKey(d)] || [];
+      if (!list.length) {
+        const e = document.createElement("div"); e.className = "cal-empty"; e.textContent = "—";
+        col.appendChild(e);
+      } else {
+        list.forEach((ev) => col.appendChild(calEventEl(ev)));
+      }
+      grid.appendChild(col);
+    });
+    body.innerHTML = "";
+    body.appendChild(grid);
+  }
+  function calEventEl(ev) {
+    const el = document.createElement("div");
+    el.className = "cal-event" + (ev.auto_record ? " armed" : "");
+    el.dataset.key = ev.key;
+    const time = document.createElement("div"); time.className = "cal-time"; time.textContent = fmtTimeRange(ev);
+    const subj = document.createElement("div"); subj.className = "cal-subject";
+    subj.textContent = ev.subject || "(no title)"; subj.title = ev.subject || "";
+    const arm = document.createElement("label"); arm.className = "cal-arm";
+    const sw = document.createElement("span"); sw.className = "switch";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!ev.auto_record;
+    const sl = document.createElement("span"); sl.className = "slider";
+    sw.append(cb, sl);
+    const txt = document.createElement("span"); txt.textContent = "Auto-record";
+    arm.append(sw, txt);
+    cb.addEventListener("change", () => toggleAutoRecord(ev, cb, el));
+    el.append(time, subj, arm);
+    return el;
+  }
+  async function toggleAutoRecord(ev, cb, el) {
+    const enabled = cb.checked;
+    cb.disabled = true;
+    const { ok, body } = await jsonFetch("/api/calendar/autorecord", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event: ev, enabled: enabled }),
+    });
+    cb.disabled = false;
+    if (ok && body) {
+      ev.auto_record = enabled;
+      el.classList.toggle("armed", enabled);
+      toast(enabled ? "Will auto-record this meeting" : "Auto-record turned off");
+    } else {
+      cb.checked = !enabled;
+      toast("Could not update auto-record");
+    }
+  }
+
+  // ---- settings: engine/storage info + push test ----------------------
+  async function loadSystemInfo() {
+    const el = document.getElementById("sys-info");
+    if (!el) return;
+    const { ok, body } = await jsonFetch("/api/system/info");
+    if (!ok || !body) { el.innerHTML = '<p class="muted">Could not load engine info.</p>'; return; }
+    const cal = body.calendar_connected
+      ? (body.calendar_source === "graph" ? "Microsoft Graph" : "Outlook desktop")
+      : "Not connected";
+    const rows = [
+      ["Recordings", body.recordings_count],
+      ["Summary model", body.model],
+      ["Transcription", "Whisper " + body.whisper_model],
+      ["Calendar", cal],
+      ["Auto-record meetings", body.auto_record_count],
+      ["Data folder", body.data_dir],
+    ];
+    el.innerHTML = rows.map((r) => "<dt>" + esc(r[0]) + "</dt><dd>" + esc(String(r[1])) + "</dd>").join("");
+  }
+
   // ---- recordings list polling (status badges in place) ---------------
   function anyActive() {
     return Array.from(document.querySelectorAll(".card [data-status]"))
@@ -682,6 +818,17 @@
   const calDisconnect = document.getElementById("cal-disconnect");
   if (calDisconnect) calDisconnect.addEventListener("click", disconnectCalendar);
 
+  // settings: send test push
+  const pushTestBtn = document.getElementById("push-test");
+  if (pushTestBtn) pushTestBtn.addEventListener("click", async () => {
+    pushTestBtn.disabled = true;
+    const { ok, body } = await jsonFetch("/api/push/test", { method: "POST" });
+    pushTestBtn.disabled = false;
+    if (ok && body && body.sent > 0) toast("Test notification sent");
+    else if (ok && body && !body.total) toast("No phone subscribed yet — enable nudges in the PWA");
+    else toast("Could not send the test notification");
+  });
+
   // ask across all meetings (dashboard)
   const gAskBtn = document.getElementById("global-ask-btn");
   const gAskInput = document.getElementById("global-ask-input");
@@ -729,13 +876,18 @@
   formatStaticCells(document);
   authenticateAudio(document);
 
-  // Only the dashboard has the record button / cards list.
+  // Only the dashboard has the record button / cards list / views.
   if (recordBtn || document.getElementById("recordings")) {
     pollStatus();
     setInterval(pollStatus, STATUS_POLL_MS);
     if (anyActive()) startListPolling();
     pollNudge();
     setInterval(pollNudge, 20000);
-    refreshCalStatus();
+
+    // left-nav views: switch on hash change, show the current one on load
+    if (document.querySelector(".view[data-view]")) {
+      window.addEventListener("hashchange", () => showView(currentView()));
+      showView(currentView());
+    }
   }
 })();

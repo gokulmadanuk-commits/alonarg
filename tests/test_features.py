@@ -318,3 +318,64 @@ def test_graph_logout(tmp_db_path, tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json() == {"signed_in": False}
     assert cleared.get("x")
     db.close()
+
+
+def test_calendar_events_connected(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import autorecord, calendars, config, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: True)
+    evs = [{"id": "e1", "subject": "Sync",
+            "start": "2026-06-24T10:00:00+00:00", "end": "2026-06-24T10:30:00+00:00"}]
+    monkeypatch.setattr(calendars, "upcoming_events", lambda days=7: [dict(e) for e in evs])
+    autorecord.approve({"id": "e1"})
+    r = client.get("/api/calendar/events")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["connected"] is True
+    assert data["events"][0]["key"] == "e1"
+    assert data["events"][0]["auto_record"] is True
+    db.close()
+
+
+def test_calendar_events_not_connected(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import calendars, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: False)
+
+    def boom(days=7):
+        raise RuntimeError("Classic Outlook isn't running")
+
+    monkeypatch.setattr(calendars, "upcoming_events", boom)
+    r = client.get("/api/calendar/events")
+    assert r.status_code == 200 and r.json()["connected"] is False
+    db.close()
+
+
+def test_calendar_autorecord_toggle(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import autorecord, config
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    ev = {"id": "e5", "subject": "Demo", "start": "s", "end": "e"}
+    r = client.post("/api/calendar/autorecord", json={"event": ev, "enabled": True})
+    assert r.status_code == 200 and r.json()["enabled"] is True
+    assert autorecord.approved_keys() == {"e5"}
+    r2 = client.post("/api/calendar/autorecord", json={"event": ev, "enabled": False})
+    assert r2.status_code == 200 and r2.json()["enabled"] is False
+    assert autorecord.approved_keys() == set()
+    db.close()
+
+
+def test_system_info(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import config, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: False)
+    db.create_recording(status="done", title="One")
+    r = client.get("/api/system/info")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["recordings_count"] == 1
+    assert "data_dir" in body and "model" in body
+    assert body["calendar_connected"] is False
+    db.close()

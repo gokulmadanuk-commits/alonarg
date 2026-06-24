@@ -26,7 +26,17 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from alonarg import assistant, audio_capture, calendars, config, ingest, msgraph, pipeline, push
+from alonarg import (
+    assistant,
+    audio_capture,
+    autorecord,
+    calendars,
+    config,
+    ingest,
+    msgraph,
+    pipeline,
+    push,
+)
 from alonarg.db import Database
 from alonarg.types import SummaryResult
 
@@ -191,6 +201,50 @@ def _merge_meta(current: dict, detected: dict) -> dict:
     return {"people": people, "contacts": contacts}
 
 
+def _begin_recording(app) -> int:
+    """Create a recording row, make its folder, and start the recorder.
+
+    Shared by the manual ``/api/record/start`` endpoint and the auto-record
+    scheduler. Marks the row as errored and re-raises if the recorder won't
+    start. Caller must ensure the recorder isn't already running.
+    """
+    db = app.state.db
+    recorder = app.state.recorder
+    rec_id = db.create_recording(status="recording")
+    app.state.current_id = rec_id
+    _rec_dir(rec_id).mkdir(parents=True, exist_ok=True)
+    try:
+        recorder.start()
+    except Exception as exc:  # noqa: BLE001 - record the failure on the row
+        log.exception("Failed to start recorder")
+        db.set_status(rec_id, "error", str(exc))
+        app.state.current_id = None
+        raise
+    return rec_id
+
+
+def _end_recording(app) -> int:
+    """Stop the recorder, persist the audio paths, and kick off processing.
+
+    Shared by ``/api/record/stop`` and the auto-record scheduler. Caller must
+    ensure the recorder is running.
+    """
+    db = app.state.db
+    recorder = app.state.recorder
+    rec_id = app.state.current_id
+    result = recorder.stop(str(_rec_dir(rec_id)))
+    db.update_recording(
+        rec_id,
+        mic_path=result.mic_path,
+        system_path=result.system_path,
+        mixed_path=result.mixed_path,
+        duration_s=result.duration_s,
+    )
+    app.state.current_id = None
+    app.state.run_pipeline(rec_id, result)
+    return rec_id
+
+
 def require_auth(request: Request) -> None:
     """FastAPI dependency enforcing the shared-secret token when configured.
 
@@ -249,6 +303,9 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     app.state.run_ingest = run_ingest
     app.state.current_id = None
     app.state.live_meeting = None
+    # Set to the event key when WE auto-started a recording, so the scheduler
+    # knows to auto-stop it (and never auto-stops a manual recording).
+    app.state.autorecord_active_key = None
 
     # Allow the phone PWA (a different origin) to call the API. Bearer-token
     # auth means we never use cookies/credentials.
@@ -294,15 +351,11 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     def record_start():
         if recorder.is_recording:
             raise HTTPException(status_code=409, detail="Already recording")
-        rec_id = db.create_recording(status="recording")
-        app.state.current_id = rec_id
-        _rec_dir(rec_id).mkdir(parents=True, exist_ok=True)
+        # A manual start clears any auto-record ownership of the session.
+        app.state.autorecord_active_key = None
         try:
-            recorder.start()
+            rec_id = _begin_recording(app)
         except Exception as exc:  # noqa: BLE001
-            log.exception("Failed to start recorder")
-            db.set_status(rec_id, "error", str(exc))
-            app.state.current_id = None
             raise HTTPException(status_code=500, detail=f"Could not start recording: {exc}")
         return {"id": rec_id}
 
@@ -310,17 +363,8 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     def record_stop():
         if not recorder.is_recording:
             raise HTTPException(status_code=409, detail="Not recording")
-        rec_id = app.state.current_id
-        result = recorder.stop(str(_rec_dir(rec_id)))
-        db.update_recording(
-            rec_id,
-            mic_path=result.mic_path,
-            system_path=result.system_path,
-            mixed_path=result.mixed_path,
-            duration_s=result.duration_s,
-        )
-        app.state.current_id = None
-        app.state.run_pipeline(rec_id, result)
+        app.state.autorecord_active_key = None
+        rec_id = _end_recording(app)
         return {"id": rec_id, "status": "transcribing"}
 
     # -- upload (phone PWA) ----------------------------------------------
@@ -585,6 +629,61 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         msgraph.sign_out()
         return {"signed_in": False}
 
+    # -- calendar view + auto-record -------------------------------------
+    @app.get("/api/calendar/events", dependencies=[Depends(require_auth)])
+    def calendar_events(days: int = 7):
+        days = max(1, min(int(days or 7), 31))
+        if not msgraph.is_signed_in() and calendars.active_source() == "outlook":
+            # Outlook fallback: only works if classic Outlook is running.
+            try:
+                events = calendars.upcoming_events(days)
+            except RuntimeError:
+                return {"connected": False, "source": "outlook", "events": []}
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=503, detail=f"Could not read the calendar: {exc}")
+        else:
+            if not msgraph.is_signed_in():
+                return {"connected": False, "source": "graph", "events": []}
+            try:
+                events = calendars.upcoming_events(days)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(status_code=503, detail=f"Could not read the calendar: {exc}")
+        approved = autorecord.approved_keys()
+        for ev in events:
+            key = autorecord.event_key(ev)
+            ev["key"] = key
+            ev["auto_record"] = key in approved
+        return {"connected": True, "source": calendars.active_source(), "events": events}
+
+    @app.post("/api/calendar/autorecord", dependencies=[Depends(require_auth)])
+    def calendar_autorecord(
+        event: dict = Body(...),
+        enabled: bool = Body(...),
+    ):
+        if enabled:
+            entry = autorecord.approve(event)
+            if not entry:
+                raise HTTPException(status_code=400, detail="Event is missing an identifier")
+        else:
+            autorecord.unapprove(autorecord.event_key(event))
+        return {"ok": True, "enabled": enabled, "key": autorecord.event_key(event)}
+
+    # -- system / admin info (Settings view) ------------------------------
+    @app.get("/api/system/info", dependencies=[Depends(require_auth)])
+    def system_info():
+        rows = db.list_recordings()
+        return {
+            "data_dir": str(config.DATA_DIR),
+            "db_path": str(config.DB_PATH),
+            "recordings_dir": str(config.RECORDINGS_DIR),
+            "model": config.OLLAMA_MODEL,
+            "whisper_model": config.WHISPER_MODEL,
+            "recordings_count": len(rows),
+            "calendar_source": calendars.active_source(),
+            "calendar_connected": msgraph.is_signed_in(),
+            "auto_record_count": len(autorecord.list_approved()),
+        }
+
     # -- audio playback ---------------------------------------------------
     @app.get("/audio/{rec_id}", dependencies=[Depends(require_auth)])
     def audio(rec_id: int):
@@ -601,12 +700,14 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
 
 
 def start_nudge_scheduler(app) -> threading.Thread:
-    """Background loop: nudge (web push) when a meeting is live and not recording.
+    """Background loop: auto-record approved meetings + nudge for the rest.
 
-    Polls Outlook every ``config.NUDGE_POLL_SECONDS``, updates
-    ``app.state.live_meeting`` for the dashboard banner, and sends one push per
-    meeting if the user hasn't started recording. Failures are swallowed so the
-    loop never dies.
+    Polls the calendar every ``config.NUDGE_POLL_SECONDS`` and:
+      * updates ``app.state.live_meeting`` for the dashboard banner,
+      * auto-starts a recording when an approved meeting is in progress, and
+        auto-stops it when that meeting ends (never touching manual recordings),
+      * otherwise sends one web-push nudge per live, non-approved meeting.
+    Failures are swallowed so the loop never dies.
     """
     def _loop():
         nudged: set = set()
@@ -620,8 +721,34 @@ def start_nudge_scheduler(app) -> threading.Thread:
                  "end": event.get("end", "")}
                 if event else None
             )
-            recording = getattr(app.state.recorder, "is_recording", False)
-            if event and not recording:
+            recorder = app.state.recorder
+            recording = getattr(recorder, "is_recording", False)
+            active_key = getattr(app.state, "autorecord_active_key", None)
+
+            # --- auto-record approved meetings ---
+            try:
+                action = autorecord.decide(event, recording, active_key)
+            except Exception:  # noqa: BLE001
+                action = "none"
+            if action == "start":
+                try:
+                    _begin_recording(app)
+                    app.state.autorecord_active_key = autorecord.event_key(event)
+                    recording = True
+                    subject = event.get("subject", "Meeting")
+                    push.send_to_all("Recording started", f"Auto-recording “{subject}”.", "/")
+                except Exception:  # noqa: BLE001
+                    log.warning("auto-record start failed", exc_info=True)
+            elif action == "stop":
+                try:
+                    _end_recording(app)
+                    app.state.autorecord_active_key = None
+                    recording = False
+                except Exception:  # noqa: BLE001
+                    log.warning("auto-record stop failed", exc_info=True)
+
+            # --- nudge for live, non-approved meetings ---
+            if event and not recording and not autorecord.is_approved(event):
                 key = (event.get("subject", ""), event.get("start", ""))
                 if key not in nudged:
                     nudged.add(key)
