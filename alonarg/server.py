@@ -25,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from alonarg import audio_capture, config, ingest, pipeline
+from alonarg import assistant, audio_capture, config, ingest, pipeline
 from alonarg.db import Database
 
 log = logging.getLogger(__name__)
@@ -55,6 +55,41 @@ def _upload_ext(filename: str | None, content_type: str | None) -> str:
         if guessed:
             return guessed
     return ".webm"
+
+
+def _context_for_recording(rec: dict) -> str:
+    """Build a compact text block (title + summary + transcript) for the LLM."""
+    parts = [f"Title: {rec.get('title') or 'Untitled'}"]
+    summ = rec.get("summary") or {}
+    if summ.get("summary"):
+        parts.append("Summary: " + summ["summary"])
+    if summ.get("action_items"):
+        parts.append("Action items: " + "; ".join(summ["action_items"]))
+    tr = rec.get("transcript") or {}
+    if tr.get("text"):
+        parts.append("Transcript:\n" + tr["text"])
+    return "\n".join(parts)
+
+
+def _global_context(db, budget: int = 12000) -> tuple[str, list[int]]:
+    """Concatenate recordings (newest-first) into a char-budgeted context block."""
+    chunks: list[str] = []
+    used: list[int] = []
+    total = 0
+    for row in db.list_recordings():
+        rec = db.get_recording(row["id"])
+        if rec is None:
+            continue
+        block = (
+            f"### Meeting {rec['id']} ({rec.get('created_at', '')}) - "
+            f"{rec.get('title', '')}\n" + _context_for_recording(rec) + "\n"
+        )
+        if used and total + len(block) > budget:
+            break
+        chunks.append(block)
+        used.append(rec["id"])
+        total += len(block)
+    return "\n".join(chunks), used
 
 
 def require_auth(request: Request) -> None:
@@ -260,6 +295,55 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
                 log.warning("Could not remove recording folder %s", folder)
         db.delete_recording(rec_id)
         return {"deleted": True}
+
+    # -- search + local-AI assistant -------------------------------------
+    @app.get("/api/search", dependencies=[Depends(require_auth)])
+    def api_search(q: str = ""):
+        return db.search_recordings(q)
+
+    @app.post("/api/ask", dependencies=[Depends(require_auth)])
+    def api_ask(
+        question: str = Body(...),
+        recording_id: int | None = Body(default=None),
+    ):
+        q = (question or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="Question is required")
+        if recording_id is not None:
+            rec = db.get_recording(recording_id)
+            if rec is None:
+                raise HTTPException(status_code=404, detail="Recording not found")
+            context, used = _context_for_recording(rec), [recording_id]
+        else:
+            context, used = _global_context(db)
+        if not context.strip():
+            return {"answer": "There are no meetings to search yet.", "used": []}
+        try:
+            answer = assistant.ask(q, context)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        return {"answer": answer, "used": used}
+
+    @app.post("/api/draft-email", dependencies=[Depends(require_auth)])
+    def api_draft_email(
+        item: str = Body(...),
+        recording_id: int | None = Body(default=None),
+    ):
+        it = (item or "").strip()
+        if not it:
+            raise HTTPException(status_code=400, detail="Action item is required")
+        context = ""
+        if recording_id is not None:
+            rec = db.get_recording(recording_id)
+            if rec is None:
+                raise HTTPException(status_code=404, detail="Recording not found")
+            summ = rec.get("summary") or {}
+            context = (rec.get("title") or "") + "\n" + (summ.get("summary") or "")
+        try:
+            draft = assistant.draft_email(it, context)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        return draft
 
     # -- audio playback ---------------------------------------------------
     @app.get("/audio/{rec_id}", dependencies=[Depends(require_auth)])

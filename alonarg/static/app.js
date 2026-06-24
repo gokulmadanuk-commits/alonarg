@@ -176,6 +176,184 @@
     }
   }
 
+  // ---- small helpers (search / ask / export) --------------------------
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function debounce(fn, ms) {
+    let t;
+    return function () { clearTimeout(t); const a = arguments; t = setTimeout(() => fn.apply(null, a), ms); };
+  }
+  function toast(msg) {
+    let el = document.getElementById("toast");
+    if (!el) { el = document.createElement("div"); el.id = "toast"; el.className = "toast"; document.body.appendChild(el); }
+    el.textContent = msg; el.classList.add("show");
+    clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove("show"), 1800);
+  }
+
+  // ---- search (dashboard) ---------------------------------------------
+  function renderCard(rec) {
+    const summary = rec.summary || {};
+    const count = (summary.action_items && summary.action_items.length) || 0;
+    const li = document.createElement("li");
+    li.className = "card";
+    li.dataset.id = rec.id;
+    li.dataset.href = "/recording/" + rec.id;
+    li.innerHTML =
+      '<div class="card-main">' +
+        '<a class="card-title" href="/recording/' + rec.id + '">' + esc(rec.title || "Untitled recording") + "</a>" +
+        '<div class="card-meta">' +
+          '<span class="meta-date" data-created="' + esc(rec.created_at || "") + '">' + esc(rec.created_at || "") + "</span>" +
+          '<span class="dot-sep">&middot;</span>' +
+          '<span class="meta-duration" data-duration="' + (rec.duration_s || 0) + '">' + (rec.duration_s || 0) + "s</span>" +
+        "</div>" +
+        (summary.summary ? '<p class="card-summary">' + esc(summary.summary) + "</p>" : "") +
+        '<div class="card-tags">' +
+          '<span class="status-badge status-' + esc(rec.status) + '" data-status>' + esc(rec.status) + "</span>" +
+          (count ? '<span class="action-count">' + count + " action item" + (count !== 1 ? "s" : "") + "</span>" : "") +
+        "</div>" +
+      "</div>" +
+      '<div class="card-actions">' +
+        '<button class="btn btn-danger delete-btn" type="button" data-id="' + rec.id + '">Delete</button>' +
+      "</div>";
+    return li;
+  }
+  function renderList(recs) {
+    const ul = document.getElementById("recordings");
+    if (!ul) return;
+    ul.innerHTML = "";
+    recs.forEach((r) => ul.appendChild(renderCard(r)));
+    formatStaticCells(ul);
+    const empty = document.getElementById("empty-state");
+    if (empty) {
+      empty.hidden = recs.length > 0;
+      if (recs.length === 0) {
+        const input = document.getElementById("search-input");
+        const q = input ? input.value.trim() : "";
+        const p = empty.querySelector("p");
+        if (p) p.textContent = q ? "No meetings match your search." : "No recordings yet.";
+      }
+    }
+  }
+  async function onSearch() {
+    const input = document.getElementById("search-input");
+    if (!input) return;
+    const { ok, body } = await jsonFetch("/api/search?q=" + encodeURIComponent(input.value.trim()));
+    if (ok && Array.isArray(body)) renderList(body);
+  }
+
+  // ---- ask the local AI ------------------------------------------------
+  async function doAsk(question, recId, answerEl, btn) {
+    question = (question || "").trim();
+    if (!question || !answerEl) return;
+    if (btn) btn.disabled = true;
+    answerEl.hidden = false;
+    answerEl.className = "ask-answer";
+    answerEl.textContent = "Thinking…";
+    const payload = recId != null ? { question: question, recording_id: Number(recId) } : { question: question };
+    const { ok, body } = await jsonFetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (ok && body) {
+      answerEl.textContent = body.answer || "(no answer)";
+    } else {
+      answerEl.className = "ask-answer error";
+      answerEl.textContent = (body && body.detail) || "Could not reach the local AI. Make sure the engine and Ollama are running.";
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  // ---- copy / export notes (detail) -----------------------------------
+  function collectList(id) {
+    return Array.from(document.querySelectorAll("#" + id + " li"))
+      .map((li) => (li.querySelector(".ai-text") || li).textContent.trim())
+      .filter(Boolean);
+  }
+  function buildNotes() {
+    const titleEl = document.getElementById("detail-title");
+    const summaryEl = document.querySelector(".summary-text");
+    const transcriptEl = document.querySelector(".transcript-text");
+    const title = (titleEl ? titleEl.textContent : "Meeting").trim();
+    const summary = (summaryEl ? summaryEl.textContent : "").trim();
+    const transcript = (transcriptEl ? transcriptEl.textContent : "").trim();
+    const actions = collectList("action-items");
+    const next = collectList("next-steps");
+    let md = "# " + title + "\n\n";
+    if (summary) md += "## Summary\n" + summary + "\n\n";
+    if (actions.length) md += "## Action items\n" + actions.map((a) => "- " + a).join("\n") + "\n\n";
+    if (next.length) md += "## Next steps\n" + next.map((a) => "- " + a).join("\n") + "\n\n";
+    if (transcript) md += "## Transcript\n" + transcript + "\n";
+    return md;
+  }
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---- draft email for email-like action items (detail) ---------------
+  const EMAIL_RE = /\b(e-?mail|send (a |an |the )?(note|message|mail|email|invite|quote|details?)|reply|respond|follow[- ]?up|write to|reach out|contact|get back to)\b/i;
+  function setupEmailDrafts() {
+    const main = document.querySelector(".detail");
+    if (!main) return;
+    const recId = main.getAttribute("data-rec-id");
+    document.querySelectorAll("#action-items .action-item").forEach((li) => {
+      const span = li.querySelector(".ai-text");
+      const text = span ? span.textContent.trim() : "";
+      if (!text || !EMAIL_RE.test(text)) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-ghost draft-email-btn";
+      btn.textContent = "✉ Draft email";
+      btn.addEventListener("click", () => draftEmail(li, text, recId, btn));
+      li.appendChild(btn);
+    });
+  }
+  async function draftEmail(li, item, recId, btn) {
+    btn.disabled = true;
+    let box = li.querySelector(".email-draft");
+    if (!box) { box = document.createElement("div"); box.className = "email-draft"; li.appendChild(box); }
+    box.innerHTML = '<p class="muted">Drafting…</p>';
+    const payload = { item: item };
+    if (recId != null) payload.recording_id = Number(recId);
+    const { ok, body } = await jsonFetch("/api/draft-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    btn.disabled = false;
+    if (!ok || !body) {
+      box.innerHTML = '<p class="ask-answer error">Could not draft the email. Make sure the engine and Ollama are running.</p>';
+      return;
+    }
+    const subject = body.subject || "";
+    const bodyText = body.body || "";
+    box.innerHTML = "";
+    const s = document.createElement("div");
+    s.className = "email-subject";
+    s.textContent = "Subject: " + subject;
+    const pre = document.createElement("pre");
+    pre.className = "email-body";
+    pre.textContent = bodyText;
+    const copy = document.createElement("button");
+    copy.type = "button"; copy.className = "btn"; copy.textContent = "Copy";
+    copy.addEventListener("click", () => { navigator.clipboard.writeText("Subject: " + subject + "\n\n" + bodyText); toast("Email copied"); });
+    const open = document.createElement("a");
+    open.className = "btn btn-accent"; open.textContent = "Open in email";
+    open.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(bodyText);
+    const actions = document.createElement("div");
+    actions.className = "email-actions";
+    actions.append(copy, open);
+    box.append(s, pre, actions);
+  }
+
   // ---- edit title (detail page) ---------------------------------------
   async function startTitleEdit() {
     const h2 = document.getElementById("detail-title");
@@ -249,6 +427,44 @@
 
   const editTitleBtn = document.querySelector(".edit-title-btn");
   if (editTitleBtn) editTitleBtn.addEventListener("click", startTitleEdit);
+
+  // search (dashboard)
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) searchInput.addEventListener("input", debounce(onSearch, 250));
+
+  // ask across all meetings (dashboard)
+  const gAskBtn = document.getElementById("global-ask-btn");
+  const gAskInput = document.getElementById("global-ask-input");
+  const gAskAnswer = document.getElementById("global-ask-answer");
+  if (gAskBtn && gAskInput && gAskAnswer) {
+    gAskBtn.addEventListener("click", () => doAsk(gAskInput.value, null, gAskAnswer, gAskBtn));
+    gAskInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAsk(gAskInput.value, null, gAskAnswer, gAskBtn); } });
+  }
+
+  // ask about this meeting (detail)
+  const askBtn = document.getElementById("ask-btn");
+  const askInput = document.getElementById("ask-input");
+  const askAnswer = document.getElementById("ask-answer");
+  const detailMain = document.querySelector(".detail");
+  if (askBtn && askInput && askAnswer && detailMain) {
+    const rid = detailMain.getAttribute("data-rec-id");
+    askBtn.addEventListener("click", () => doAsk(askInput.value, rid, askAnswer, askBtn));
+    askInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAsk(askInput.value, rid, askAnswer, askBtn); } });
+  }
+
+  // copy / download notes (detail)
+  const copyBtn = document.getElementById("copy-notes");
+  if (copyBtn) copyBtn.addEventListener("click", () => { navigator.clipboard.writeText(buildNotes()).then(() => toast("Notes copied")); });
+  const dlBtn = document.getElementById("download-notes");
+  if (dlBtn) dlBtn.addEventListener("click", () => {
+    const titleEl = document.getElementById("detail-title");
+    const title = (titleEl ? titleEl.textContent : "meeting").trim();
+    const safe = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "meeting";
+    downloadText(safe + ".md", buildNotes());
+  });
+
+  // email drafts on email-like action items (detail)
+  setupEmailDrafts();
 
   formatStaticCells(document);
   authenticateAudio(document);

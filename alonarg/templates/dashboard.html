@@ -23,7 +23,19 @@
   </header>
 
   <main class="container">
-    <h2 class="section-title">Recordings</h2>
+    <section class="panel ask-panel">
+      <h3>Ask your meetings</h3>
+      <div class="ask-row">
+        <input id="global-ask-input" class="ask-input" type="text" placeholder="Ask across all your meetings…" />
+        <button id="global-ask-btn" class="btn btn-accent" type="button">Ask</button>
+      </div>
+      <div id="global-ask-answer" class="ask-answer" hidden></div>
+    </section>
+
+    <div class="list-toolbar">
+      <h2 class="section-title">Recordings</h2>
+      <input id="search-input" class="search-input" type="search" placeholder="Search meetings…" />
+    </div>
 
     <div id="empty-state" class="empty-state" {% if recordings %}hidden{% endif %}>
       <p>No recordings yet.</p>

@@ -210,6 +210,34 @@ class Database:
             result.append(record)
         return result
 
+    def search_recordings(self, query: str) -> list[dict]:
+        """Return recordings whose title, summary, or transcript matches ``query``.
+
+        Case-insensitive substring match across the title and the summary/
+        transcript JSON blobs, newest-first. An empty query returns everything
+        (same as :meth:`list_recordings`). The transcript body is omitted from
+        rows, like :meth:`list_recordings`.
+        """
+        q = (query or "").strip()
+        if not q:
+            return self.list_recordings()
+        like = f"%{q}%"
+        cols = ", ".join(_LIST_COLUMNS)
+        rows = self._conn.execute(
+            f"""
+            SELECT {cols} FROM recordings
+            WHERE title LIKE ? OR summary_json LIKE ? OR transcript_json LIKE ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (like, like, like),
+        ).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            record = dict(row)
+            record["summary"] = _loads_or_none(record.get("summary_json"))
+            result.append(record)
+        return result
+
     # --- lifecycle --------------------------------------------------------
 
     def close(self) -> None:

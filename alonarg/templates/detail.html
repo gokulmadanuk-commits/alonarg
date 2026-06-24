@@ -16,7 +16,7 @@
     <a class="btn btn-ghost" href="/">&larr; Back</a>
   </header>
 
-  <main class="container detail">
+  <main class="container detail" data-rec-id="{{ rec.id }}">
     <div class="title-row">
       <h2 class="detail-title" id="detail-title" data-id="{{ rec.id }}">{{ rec.title or "Untitled recording" }}</h2>
       <button class="btn btn-ghost edit-title-btn" type="button" title="Rename meeting">Edit title</button>
@@ -27,6 +27,11 @@
       <span class="meta-duration" data-duration="{{ rec.duration_s or 0 }}">{{ rec.duration_s or 0 }}s</span>
       <span class="dot-sep">&middot;</span>
       <span class="status-badge status-{{ rec.status }}">{{ rec.status }}</span>
+    </div>
+
+    <div class="detail-toolbar">
+      <button id="copy-notes" class="btn" type="button">Copy notes</button>
+      <button id="download-notes" class="btn" type="button">Download .md</button>
     </div>
 
     {% if rec.status != "done" %}
@@ -46,6 +51,15 @@
     </section>
     {% endif %}
 
+    <section class="panel ask-panel">
+      <h3>Ask about this meeting</h3>
+      <div class="ask-row">
+        <input id="ask-input" class="ask-input" type="text" placeholder="e.g. What did we decide? What are my action items?" />
+        <button id="ask-btn" class="btn btn-accent" type="button">Ask</button>
+      </div>
+      <div id="ask-answer" class="ask-answer" hidden></div>
+    </section>
+
     {% set summary = rec.summary %}
     <section class="panel">
       <h3>Summary</h3>
@@ -59,8 +73,8 @@
     <section class="panel">
       <h3>Action items</h3>
       {% if summary and summary.action_items %}
-        <ul class="bullet-list">
-          {% for item in summary.action_items %}<li>{{ item }}</li>{% endfor %}
+        <ul class="bullet-list" id="action-items">
+          {% for item in summary.action_items %}<li class="action-item"><span class="ai-text">{{ item }}</span></li>{% endfor %}
         </ul>
       {% else %}
         <p class="muted">None.</p>
@@ -70,7 +84,7 @@
     <section class="panel">
       <h3>Next steps</h3>
       {% if summary and summary.next_steps %}
-        <ul class="bullet-list">
+        <ul class="bullet-list" id="next-steps">
           {% for item in summary.next_steps %}<li>{{ item }}</li>{% endfor %}
         </ul>
       {% else %}
