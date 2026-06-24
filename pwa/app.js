@@ -11,15 +11,20 @@
 const LS_BASE = 'alonarg.base';
 const LS_TOKEN = 'alonarg.token';
 
+function normalizeBase(s) {
+  let b = (s || '').trim().replace(/\/+$/, ''); // trim spaces + trailing slash(es)
+  if (b && !/^https?:\/\//i.test(b)) b = 'https://' + b; // forgive a missing scheme
+  return b;
+}
+
 function getConfig() {
-  let base = (localStorage.getItem(LS_BASE) || '').trim();
-  base = base.replace(/\/+$/, ''); // trim trailing slash(es)
+  const base = normalizeBase(localStorage.getItem(LS_BASE));
   const token = (localStorage.getItem(LS_TOKEN) || '').trim();
   return { base, token, configured: !!base };
 }
 
 function setConfig(base, token) {
-  localStorage.setItem(LS_BASE, (base || '').trim().replace(/\/+$/, ''));
+  localStorage.setItem(LS_BASE, normalizeBase(base));
   localStorage.setItem(LS_TOKEN, (token || '').trim());
 }
 
@@ -800,7 +805,7 @@ async function onTestConnection() {
   const base = $('#cfg-base').value;
   const token = $('#cfg-token').value;
   // Use the entered (not necessarily saved) values for the test.
-  const cleanBase = (base || '').trim().replace(/\/+$/, '');
+  const cleanBase = normalizeBase(base);
   const result = $('#test-result');
   result.hidden = false;
   result.className = 'test-result';
