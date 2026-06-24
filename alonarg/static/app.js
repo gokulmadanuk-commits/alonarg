@@ -217,6 +217,9 @@
     document.querySelectorAll(".nav-link[data-view]").forEach((a) => { a.classList.toggle("active", a.dataset.view === name); });
     const t = document.getElementById("view-title");
     if (t) t.textContent = VIEW_TITLES[name] || "Recordings";
+    // The calendar wants the full width; other views read better narrow.
+    const main = document.querySelector(".content-main");
+    if (main) main.classList.toggle("cal-wide", name === "calendar");
     if (name === "calendar") loadCalendar();
     if (name === "settings") { refreshCalStatus(); loadSystemInfo(); }
   }
