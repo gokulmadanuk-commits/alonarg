@@ -16,12 +16,14 @@ Everything here runs on my laptop with the local model (no API costs).
 - Draft email for email-like action items **and** next steps (local-LLM → subject/body, copy / open in mail).
 - Edit notes (summary / action items / next steps).
 - Details sidebar: people + contacts (manual edit + local-LLM "Detect").
+- Outlook desktop calendar sync (local COM): event title + attendee names/emails into Details.
+- Structured contact rows (separate name/email/phone fields) in the Details editor.
+- Meeting nudges: phone push (Web Push) + subtle dashboard banner when a meeting is live and
+  you're not recording. One nudge per meeting; skips all-day/declined.
+- "Record on laptop" from the phone PWA (triggers the PC to record system + mic).
 
 ## 🔨 In progress
-- **Outlook desktop calendar sync** — match a recording to its calendar event (local COM,
-  no OAuth) → auto-title + real attendee names/emails into the Details pane.
-- **Structured contact rows** in the Details editor (separate name/email/phone fields, add/remove)
-  instead of one text box.
+- (nothing right now)
 
 ## ⏭️ Next up (agreed)
 - **Global action-items hub** — one page with every open action item across meetings, with
@@ -40,5 +42,9 @@ Everything here runs on my laptop with the local model (no API costs).
 - Semantic search (local embeddings via Ollama) for fuzzy "find meetings about X".
 - Gmail integration (personal email) — back burner; Outlook/work first.
 
-## 🚫 Not planning (for now)
+## 🚫 Not planning / not feasible
 - Packaging/installer + selling as a product (revisit later if ever).
+- Capturing system / other-party audio on the PHONE (e.g. a Teams call joined on the phone):
+  not possible from a PWA — mobile browsers only expose the microphone, never another app's or
+  the system's audio. Workaround: join such meetings on the laptop too and use "Record on
+  laptop". (This was record-button idea #3 — scrapped.)
