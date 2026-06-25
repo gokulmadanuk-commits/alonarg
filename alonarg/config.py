@@ -40,6 +40,8 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "300"))
+# Local embedding model for semantic search / "second brain" (no API cost).
+OLLAMA_EMBED_MODEL = os.environ.get("ALONARG_EMBED_MODEL", "nomic-embed-text")
 
 # --- Server ---
 SERVER_HOST = os.environ.get("ALONARG_HOST", "127.0.0.1")

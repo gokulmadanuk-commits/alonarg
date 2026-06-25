@@ -97,6 +97,62 @@ def test_ask_global(tmp_db_path, tmp_path, monkeypatch):
     db.close()
 
 
+def test_ask_rag_with_citations(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import brain
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    monkeypatch.setattr(brain, "available", lambda: True)
+    monkeypatch.setattr(brain, "search", lambda d, q, k=12: [
+        {"recording_id": a, "source_type": "transcript", "start_s": 30.0, "end_s": 60.0,
+         "text": "we set pricing at $99", "score": 0.9},
+    ])
+    captured = {}
+    monkeypatch.setattr(assistant, "ask_cited", lambda q, ctx, **k: captured.update(ctx=ctx) or "It was $99 [1].")
+    r = client.post("/api/ask", json={"question": "what did we decide on pricing?"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["answer"] == "It was $99 [1]."
+    assert body["sources"][0]["recording_id"] == a and body["sources"][0]["start_s"] == 30.0
+    assert "[1]" in captured["ctx"]
+    db.close()
+
+
+def test_ask_counting_skips_rag(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import brain
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    _seed(db)
+    called = {"rag": False}
+    monkeypatch.setattr(brain, "available", lambda: True)
+    monkeypatch.setattr(brain, "search", lambda *a, **k: called.update(rag=True) or [])
+    monkeypatch.setattr(assistant, "ask", lambda q, ctx, **k: "answer")
+    r = client.post("/api/ask", json={"question": "how many meetings have no action items?"})
+    assert r.status_code == 200 and called["rag"] is False  # counting avoids RAG
+    db.close()
+
+
+def test_search_includes_semantic(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import brain
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, b = _seed(db)  # "Pricing discussion" / "Design review"
+    monkeypatch.setattr(brain, "available", lambda: True)
+    monkeypatch.setattr(brain, "search", lambda d, q, k=12: [{"recording_id": b, "start_s": 0, "text": "x"}])
+    ids = [x["id"] for x in client.get("/api/search", params={"q": "kickoff planning xyz"}).json()]
+    assert b in ids  # surfaced semantically despite no keyword match
+    db.close()
+
+
+def test_brain_status_and_reindex(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import brain
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    s = client.get("/api/brain/status").json()
+    assert "indexed" in s and s["available"] is False
+    assert client.post("/api/brain/reindex").status_code == 503  # model not available
+    monkeypatch.setattr(brain, "available", lambda: True)
+    monkeypatch.setattr(brain, "reindex_all", lambda d, only_missing=False: 0)
+    assert client.post("/api/brain/reindex").json()["started"] is True
+    db.close()
+
+
 def test_ask_global_includes_computed_stats(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     _seed(db)  # one meeting has 1 action item, the other has none; neither has next steps

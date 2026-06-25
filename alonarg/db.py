@@ -73,6 +73,24 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 """
 
+# Semantic-search chunks (the "second brain"): transcript/summary slices with a
+# local embedding stored as a packed float32 blob, plus a timestamp for citations.
+_CHUNKS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS chunks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id  INTEGER NOT NULL,
+    source_type   TEXT,
+    chunk_index   INTEGER,
+    start_s       REAL,
+    end_s         REAL,
+    speaker       TEXT,
+    text          TEXT,
+    embedding     BLOB,
+    embed_model   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_recording ON chunks(recording_id);
+"""
+
 
 def _utc_now_iso() -> str:
     """Return the current time as an ISO-8601 UTC string."""
@@ -106,6 +124,7 @@ class Database:
     def _create_schema(self) -> None:
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._conn.executescript(_CHUNKS_SCHEMA)
             # Migrate older databases that predate newer columns.
             existing = {row[1] for row in self._conn.execute("PRAGMA table_info(recordings)")}
             if "meta_json" not in existing:
@@ -192,13 +211,44 @@ class Database:
         self.update_recording(rec_id, state_json=json.dumps(state))
 
     def delete_recording(self, rec_id: int) -> bool:
-        """Delete a recording. Return True if a row was removed."""
+        """Delete a recording (and its semantic chunks). True if a row was removed."""
         with self._lock:
+            self._conn.execute("DELETE FROM chunks WHERE recording_id = ?", (rec_id,))
             cur = self._conn.execute(
                 "DELETE FROM recordings WHERE id = ?", (rec_id,)
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    # --- semantic chunks (second brain) -----------------------------------
+
+    def replace_chunks(self, rec_id: int, chunks: list[dict]) -> None:
+        """Replace all semantic chunks for a recording."""
+        with self._lock:
+            self._conn.execute("DELETE FROM chunks WHERE recording_id = ?", (rec_id,))
+            for c in chunks:
+                self._conn.execute(
+                    """INSERT INTO chunks
+                       (recording_id, source_type, chunk_index, start_s, end_s, speaker, text, embedding, embed_model)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (rec_id, c.get("source_type"), c.get("chunk_index"), c.get("start_s"),
+                     c.get("end_s"), c.get("speaker"), c.get("text"), c.get("embedding"),
+                     c.get("embed_model", "")),
+                )
+            self._conn.commit()
+
+    def all_chunks(self) -> list[dict]:
+        """All chunks (id, recording_id, source_type, start/end, text, embedding blob)."""
+        rows = self._conn.execute(
+            "SELECT id, recording_id, source_type, start_s, end_s, text, embedding FROM chunks"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_chunks(self) -> int:
+        return int(self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+
+    def recordings_with_chunks(self) -> set:
+        return {r[0] for r in self._conn.execute("SELECT DISTINCT recording_id FROM chunks")}
 
     # --- reads ------------------------------------------------------------
 

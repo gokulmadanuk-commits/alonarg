@@ -117,6 +117,18 @@ def brief(subject: str, attendees: list[str], context_text: str, **kw) -> dict:
     }
 
 
+def ask_cited(question: str, numbered_context: str, **kw) -> str:
+    """Answer using ONLY numbered context snippets, citing them inline as [n]."""
+    system = (
+        "You answer questions about the user's meetings using ONLY the numbered "
+        "context snippets provided. After each statement, cite the snippet "
+        "number(s) you used in square brackets, e.g. [1] or [2][3]. If the answer "
+        "isn't in the snippets, say you couldn't find it in the meetings. Be concise."
+    )
+    user = "Context snippets:\n" + numbered_context + "\n\n=== QUESTION ===\n" + question
+    return _chat(system, user, **kw).strip()
+
+
 def draft_email(action_item: str, context_text: str = "", **kw) -> dict:
     """Draft a short professional email for an action item.
 

@@ -40,6 +40,16 @@ Everything here runs on my laptop with the local model (no API costs).
   meetings on that subject/people (incl. still-open action items), using the local model.
   Also pulls **recent emails** with the attendees (read-only Microsoft Graph `Mail.Read`)
   when granted; degrades to meetings-only otherwise.
+- **Briefs tab** — auto-prepared, structured briefs (headline + key points + action items)
+  for meetings flagged to record; detail view with participants. On desktop + PWA.
+- **People view** — relationship memory: everyone across your meetings (merged by email,
+  name fallback, excludes you), action-first list → person detail with open items, recent
+  emails, and meeting history.
+- **Second Brain (semantic search + cited answers)** — local embeddings (`nomic-embed-text`
+  via Ollama) over transcript/summary chunks in SQLite (NumPy cosine). "Ask your meetings"
+  now does RAG with **clickable citations** that deep-link to the exact meeting + timestamp;
+  keyword search folds in semantically-related meetings; counting questions still use the
+  exact OVERVIEW path. Auto-indexes new meetings + backfills on startup; Settings → Rebuild.
 
 ## 🔨 In progress
 - (nothing right now)
@@ -55,9 +65,14 @@ is now shipped.)*
 - **Topic / chapter segmentation + time-per-topic** (Medium) — LLM segments the transcript
   into topics with timestamps (map-reduce for long calls); clickable chapters reuse the
   transcript-sync UI. *(Avoma/tl;dv.)*
-- **Semantic search + cited answers** (Medium) — local embeddings (`nomic-embed-text` via
-  Ollama) in SQLite (`sqlite-vec`); fuzzy "find meetings about X" and Q&A answers that link
-  back to the exact transcript moment. Adds one small model + dep. *(Otter/Granola.)*
+- **Lightweight PARA** (Medium) — Tiago Forte's PARA as an *auto-suggested* layer (research
+  done): one optional **Project** or **Area** per meeting (LLM suggests on finish; one-tap
+  accept), Resources = existing tags, Archives derived from inactivity. Adds a Q&A "scope"
+  (ask within a Project/Area) on top of the Second Brain. Suggest, never force.
+- **"Related meetings" rail** (Easy, now that embeddings exist) — passive Smart-Connections-
+  style sidebar on the detail page showing the most similar past meetings.
+- **Per-Project/person rollups** (Medium) — "what have I learned/decided about X" synthesis
+  over the RAG corpus (Reflect-style); weekly digest pushed to the phone.
 - **Cross-meeting rollups** (Medium) — weekly "what happened" digest by map-reduce over
   per-meeting summaries. *(tl;dv multi-meeting intelligence.)*
 - **Sentiment per chapter** (Medium) — coarse tone labels from the LLM. *(tl;dv/Fireflies.)*

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 import shutil
 import threading
 import time
@@ -32,6 +33,7 @@ from alonarg import (
     assistant,
     audio_capture,
     autorecord,
+    brain,
     briefs,
     calendars,
     config,
@@ -166,6 +168,61 @@ def _global_context(db, budget: int = 12000) -> tuple[str, list[int]]:
         used.append(rec["id"])
         total += len(block)
     return "\n".join(chunks), used
+
+
+_COUNTING_RE = re.compile(
+    r"\b(how many|how much|number of|count|total|most|least|fewest|longest|shortest|"
+    r"average|which meetings?|no action items|each meeting|all meetings|across (all|every))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_counting(q: str) -> bool:
+    return bool(_COUNTING_RE.search(q or ""))
+
+
+def _fmt_ts(seconds) -> str:
+    if seconds is None:
+        return ""
+    s = int(float(seconds))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+def _build_rag_context(db, hits: list[dict]) -> tuple[str, list[dict]]:
+    """Numbered context block + structured sources from semantic hits.
+
+    Dedupes to <=2 chunks per meeting and caps at 8 snippets.
+    """
+    titles: dict = {}
+
+    def title(rid):
+        if rid not in titles:
+            r = db.get_recording(rid)
+            titles[rid] = (r.get("title") if r else "") or "Untitled"
+        return titles[rid]
+
+    per: dict = {}
+    picked: list[dict] = []
+    for h in hits:
+        rid = h["recording_id"]
+        if per.get(rid, 0) >= 2:
+            continue
+        per[rid] = per.get(rid, 0) + 1
+        picked.append(h)
+        if len(picked) >= 8:
+            break
+
+    lines: list[str] = []
+    sources: list[dict] = []
+    for n, h in enumerate(picked, 1):
+        rid = h["recording_id"]
+        t = title(rid)
+        ts = _fmt_ts(h.get("start_s"))
+        snippet = (h.get("text") or "")[:400]
+        loc = f" @ {ts}" if ts else ""
+        lines.append(f'[{n}] {t}{loc}: "{snippet}"')
+        sources.append({"n": n, "recording_id": rid, "title": t, "start_s": h.get("start_s"), "snippet": snippet})
+    return "\n".join(lines), sources
 
 
 def _clean_list(items) -> list[str]:
@@ -459,7 +516,10 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             thread = threading.Thread(
                 target=pipeline.process_recording,
                 args=(db, rec_id, recording_result),
-                kwargs={"enrich_fn": lambda rid: _enrich_recording(db, rid)},
+                kwargs={
+                    "enrich_fn": lambda rid: _enrich_recording(db, rid),
+                    "index_fn": lambda rid: brain.index_recording(db, rid),
+                },
                 daemon=True,
             )
             thread.start()
@@ -748,7 +808,29 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     # -- search + local-AI assistant -------------------------------------
     @app.get("/api/search", dependencies=[Depends(require_auth)])
     def api_search(q: str = ""):
-        return db.search_recordings(q)
+        results = db.search_recordings(q)
+        query = (q or "").strip()
+        # Fold in semantically-related meetings keyword search missed.
+        if query and brain.available():
+            have = {r["id"] for r in results}
+            try:
+                hits = brain.search(db, query, k=12)
+            except Exception:  # noqa: BLE001
+                hits = []
+            for h in hits:
+                rid = h["recording_id"]
+                if rid in have:
+                    continue
+                rec = db.get_recording(rid)
+                if rec is None:
+                    continue
+                have.add(rid)
+                results.append({
+                    "id": rec["id"], "title": rec.get("title"), "created_at": rec.get("created_at"),
+                    "duration_s": rec.get("duration_s"), "status": rec.get("status"),
+                    "summary": rec.get("summary"), "state": rec.get("state"),
+                })
+        return results
 
     @app.post("/api/ask", dependencies=[Depends(require_auth)])
     def api_ask(
@@ -758,20 +840,44 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         q = (question or "").strip()
         if not q:
             raise HTTPException(status_code=400, detail="Question is required")
+
+        # Single meeting -> answer from just that meeting (no retrieval needed).
         if recording_id is not None:
             rec = db.get_recording(recording_id)
             if rec is None:
                 raise HTTPException(status_code=404, detail="Recording not found")
-            context, used = _context_for_recording(rec), [recording_id]
-        else:
-            context, used = _global_context(db)
+            context = _context_for_recording(rec)
+            if not context.strip():
+                return {"answer": "There's nothing in this meeting yet.", "used": [], "sources": []}
+            try:
+                answer = assistant.ask(q, context)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc))
+            return {"answer": answer, "used": [recording_id], "sources": []}
+
+        # Across all meetings: use semantic RAG (with citations) for recall-style
+        # questions; keep the deterministic OVERVIEW path for counting questions.
+        if not _is_counting(q) and brain.available():
+            try:
+                hits = brain.search(db, q, k=12)
+            except Exception:  # noqa: BLE001
+                hits = []
+            if hits:
+                numbered, sources = _build_rag_context(db, hits)
+                try:
+                    answer = assistant.ask_cited(q, numbered)
+                except RuntimeError as exc:
+                    raise HTTPException(status_code=503, detail=str(exc))
+                return {"answer": answer, "used": sorted({s["recording_id"] for s in sources}), "sources": sources}
+
+        context, used = _global_context(db)
         if not context.strip():
-            return {"answer": "There are no meetings to search yet.", "used": []}
+            return {"answer": "There are no meetings to search yet.", "used": [], "sources": []}
         try:
             answer = assistant.ask(q, context)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
-        return {"answer": answer, "used": used}
+        return {"answer": answer, "used": used, "sources": []}
 
     @app.post("/api/draft-email", dependencies=[Depends(require_auth)])
     def api_draft_email(
@@ -1055,6 +1161,28 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             "auto_record_count": len(autorecord.list_approved()),
         }
 
+    # -- second brain (semantic index) -----------------------------------
+    @app.get("/api/brain/status", dependencies=[Depends(require_auth)])
+    def brain_status():
+        return brain.status(db)
+
+    @app.post("/api/brain/reindex", dependencies=[Depends(require_auth)])
+    def brain_reindex():
+        if not brain.available():
+            raise HTTPException(
+                status_code=503,
+                detail="Embedding model not installed. Run: ollama pull nomic-embed-text",
+            )
+
+        def _run():
+            try:
+                brain.reindex_all(db, only_missing=False)
+            except Exception:  # noqa: BLE001
+                log.warning("reindex failed", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True, name="alonarg-reindex").start()
+        return {"started": True, "total": len(db.list_recordings())}
+
     # -- people (relationship memory) ------------------------------------
     def _self_emails() -> set:
         emails = set(config.self_emails())
@@ -1106,6 +1234,16 @@ def start_nudge_scheduler(app) -> threading.Thread:
       * otherwise sends one web-push nudge per live, non-approved meeting.
     Failures are swallowed so the loop never dies.
     """
+    # One-shot background backfill: embed any recordings not yet indexed.
+    def _backfill():
+        try:
+            if brain.available():
+                brain.reindex_all(app.state.db, only_missing=True)
+        except Exception:  # noqa: BLE001
+            log.warning("semantic backfill failed", exc_info=True)
+
+    threading.Thread(target=_backfill, daemon=True, name="alonarg-backfill").start()
+
     def _loop():
         nudged: set = set()
         while True:
