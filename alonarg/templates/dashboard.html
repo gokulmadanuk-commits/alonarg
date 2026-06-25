@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#f6f7f9" />
+  <meta name="theme-color" content="#f4f1e8" />
   <title>Alonarg</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -123,6 +123,16 @@
             <h3>Notifications</h3>
             <p class="muted">Meeting nudges are delivered to your phone through the Alonarg PWA. Enable them in the phone app, then send a test here.</p>
             <button id="push-test" class="btn" type="button">Send test notification</button>
+          </section>
+
+          <section class="panel">
+            <h3>Keyword trackers</h3>
+            <p class="muted">Watch terms across all your meetings — see how many mention each.</p>
+            <div class="tracker-add">
+              <input id="tracker-input" class="ask-input" type="text" placeholder="Add a term to track, press Enter" maxlength="60" />
+              <button id="tracker-add-btn" class="btn btn-accent" type="button">Add</button>
+            </div>
+            <div id="trackers-list" class="trackers-list"></div>
           </section>
 
           <section class="panel">

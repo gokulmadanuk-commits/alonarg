@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#f6f7f9" />
+  <meta name="theme-color" content="#f4f1e8" />
   <title>{{ (rec.title or "Recording") }} &middot; Alonarg</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -182,6 +182,31 @@
             </div>
             {% endfor %}
           </div>
+        </section>
+        {% endif %}
+
+        {% if coaching %}
+        <section class="panel">
+          <h3>Coaching</h3>
+          <ul class="coach-list">
+            <li><span class="coach-k">Questions asked</span><span class="coach-v">{{ coaching.questions_total }}{% if coaching.questions_you %} <span class="muted">(you {{ coaching.questions_you }})</span>{% endif %}</span></li>
+            <li><span class="coach-k">Longest monologue</span><span class="coach-v">{{ (coaching.longest_monologue_s // 60)|int }}m {{ (coaching.longest_monologue_s % 60)|int }}s{% if coaching.longest_monologue_speaker %} <span class="muted">({{ coaching.longest_monologue_speaker }})</span>{% endif %}</span></li>
+            {% if coaching.filler_per_min is not none %}<li><span class="coach-k">Filler words</span><span class="coach-v">{{ coaching.filler_count }} <span class="muted">({{ coaching.filler_per_min }}/min)</span></span></li>{% endif %}
+            {% if coaching.your_wpm is not none %}<li><span class="coach-k">Your pace</span><span class="coach-v">{{ coaching.your_wpm }} <span class="muted">wpm</span></span></li>{% endif %}
+          </ul>
+        </section>
+        {% endif %}
+
+        {% if related %}
+        <section class="panel">
+          <h3>This series</h3>
+          <p class="muted side-note">Other meetings with this title.</p>
+          <ul class="side-list">
+            {% for r in related %}
+            <li><a class="series-link" href="/recording/{{ r.id }}">{{ r.title }}</a>
+              <span class="meta-date" data-created="{{ r.created_at }}">{{ r.created_at }}</span></li>
+            {% endfor %}
+          </ul>
         </section>
         {% endif %}
 

@@ -424,6 +424,46 @@ def test_update_state_tags_pin(tmp_db_path, tmp_path, monkeypatch):
     db.close()
 
 
+def test_trackers_endpoints(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import config
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    _seed(db)  # "Pricing discussion" with summary mentioning the price
+    data = client.post("/api/trackers", json={"term": "pricing"}).json()
+    pricing = next(t for t in data if t["term"] == "pricing")
+    assert pricing["count"] >= 1
+    assert any(t["term"] == "pricing" for t in client.get("/api/trackers").json())
+    after = client.post("/api/trackers/delete", json={"term": "pricing"}).json()
+    assert all(t["term"] != "pricing" for t in after)
+    db.close()
+
+
+def test_brief_with_history(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import assistant
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    _seed(db)
+    captured = {}
+
+    def fake_brief(subject, attendees, context, **k):
+        captured["ctx"] = context
+        return "Last time you set pricing at $99."
+
+    monkeypatch.setattr(assistant, "brief", fake_brief)
+    r = client.post("/api/calendar/brief", json={"subject": "Pricing discussion", "attendees": ["Jai"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["based_on"] >= 1 and "99" in captured["ctx"]
+    assert body["brief"] == "Last time you set pricing at $99."
+    db.close()
+
+
+def test_brief_no_history(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    r = client.post("/api/calendar/brief", json={"subject": "Brand new meeting zzz", "attendees": []})
+    assert r.status_code == 200 and r.json()["based_on"] == 0
+    db.close()
+
+
 def test_action_items_hub_and_toggle(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     a, b = _seed(db)  # a has one action item, b has none

@@ -222,7 +222,56 @@
     if (main) main.classList.toggle("cal-wide", name === "calendar");
     if (name === "calendar") loadCalendar();
     if (name === "tasks") loadTasks();
-    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); }
+    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); }
+  }
+
+  // ---- keyword trackers (settings) -----------------------------------
+  async function loadTrackers() {
+    const box = document.getElementById("trackers-list");
+    if (!box) return;
+    const { ok, body } = await jsonFetch("/api/trackers");
+    if (ok && Array.isArray(body)) renderTrackers(body);
+  }
+  function renderTrackers(list) {
+    const box = document.getElementById("trackers-list");
+    if (!box) return;
+    if (!list.length) { box.innerHTML = '<span class="muted">No trackers yet.</span>'; return; }
+    box.innerHTML = "";
+    list.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "tracker-row";
+      const term = document.createElement("button");
+      term.type = "button"; term.className = "tracker-term"; term.textContent = t.term;
+      term.title = "See meetings mentioning “" + t.term + "”";
+      term.addEventListener("click", () => jumpToSearch(t.term));
+      const count = document.createElement("span");
+      count.className = "tracker-count";
+      count.textContent = t.count + " meeting" + (t.count !== 1 ? "s" : "");
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "tag-x"; rm.textContent = "×"; rm.title = "Remove";
+      rm.addEventListener("click", () => removeTracker(t.term));
+      row.append(term, count, rm);
+      box.appendChild(row);
+    });
+  }
+  async function addTracker(term) {
+    term = (term || "").trim();
+    if (!term) return;
+    const { ok, body } = await jsonFetch("/api/trackers", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term: term }),
+    });
+    if (ok && Array.isArray(body)) renderTrackers(body);
+  }
+  async function removeTracker(term) {
+    const { ok, body } = await jsonFetch("/api/trackers/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term: term }),
+    });
+    if (ok && Array.isArray(body)) renderTrackers(body);
+  }
+  function jumpToSearch(term) {
+    location.hash = "#recordings";
+    const input = document.getElementById("search-input");
+    if (input) { input.value = term; onSearch(); }
   }
 
   // ---- tasks hub (all action items across meetings) -------------------
@@ -462,7 +511,9 @@
       '<div class="cal-pop-time muted">' + esc(fmtTimeRange(ev)) + "</div>" +
       (n ? '<div class="cal-pop-att muted">' + n + " attendee" + (n !== 1 ? "s" : "") + "</div>" : "") +
       '<label class="cal-pop-arm"><span class="switch"><input type="checkbox"' + (ev.auto_record ? " checked" : "") +
-      '><span class="slider"></span></span><span>Auto-record this meeting</span></label>';
+      '><span class="slider"></span></span><span>Auto-record this meeting</span></label>' +
+      '<button class="btn btn-ghost cal-pop-brief" type="button">📋 Brief me</button>' +
+      '<div class="cal-pop-briefout" hidden></div>';
     document.body.appendChild(pop);
     const r = anchor.getBoundingClientRect();
     const W = 256;
@@ -475,8 +526,29 @@
     pop.style.top = (window.scrollY + Math.max(8, r.top)) + "px";
     const cb = pop.querySelector("input");
     cb.addEventListener("change", () => toggleAutoRecord(ev, cb, anchor));
+    const briefBtn = pop.querySelector(".cal-pop-brief");
+    const briefOut = pop.querySelector(".cal-pop-briefout");
+    if (briefBtn) briefBtn.addEventListener("click", () => genBrief(ev, briefBtn, briefOut));
     setTimeout(() => document.addEventListener("click", _popOutside), 0);
     _popEl = pop;
+  }
+  async function genBrief(ev, btn, out) {
+    btn.disabled = true;
+    out.hidden = false;
+    out.textContent = "Thinking…";
+    const attendees = (ev.attendees || []).map((a) => a.name || a.email).filter(Boolean);
+    const { ok, body } = await jsonFetch("/api/calendar/brief", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: ev.subject || "", attendees: attendees }),
+    });
+    btn.disabled = false;
+    if (ok && body) {
+      out.textContent = body.based_on === 0
+        ? "No past meetings on this topic or with these people yet."
+        : (body.brief || "(no brief)");
+    } else {
+      out.textContent = (body && body.detail) || "Could not generate (is Ollama running?).";
+    }
   }
 
   async function toggleAutoRecord(ev, cb, blockEl) {
@@ -1115,6 +1187,15 @@
   // tasks: open-only filter
   const tasksOpenOnly = document.getElementById("tasks-open-only");
   if (tasksOpenOnly) tasksOpenOnly.addEventListener("change", loadTasks);
+
+  // settings: keyword trackers
+  const trackerAddBtn = document.getElementById("tracker-add-btn");
+  const trackerInput = document.getElementById("tracker-input");
+  if (trackerAddBtn && trackerInput) {
+    const doAdd = () => { addTracker(trackerInput.value); trackerInput.value = ""; };
+    trackerAddBtn.addEventListener("click", doAdd);
+    trackerInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+  }
 
   // settings: send test push
   const pushTestBtn = document.getElementById("push-test");
