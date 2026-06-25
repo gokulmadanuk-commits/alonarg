@@ -28,6 +28,7 @@ def process_recording(
     *,
     transcribe_fn=transcribe_mod.transcribe,
     summarize_fn=summarize_mod.summarize,
+    enrich_fn=None,
 ) -> None:
     """Transcribe, summarize, and finalize a recording.
 
@@ -35,10 +36,13 @@ def process_recording(
       1. ``transcribing`` -> run ``transcribe_fn`` -> store the transcript.
       2. ``summarizing``  -> run ``summarize_fn`` -> store the summary; if the
          summary has a title, update the recording's title to match.
-      3. ``done``.
+      3. optional ``enrich_fn(rec_id)`` -> match the calendar event and fill in
+         people/contacts/title. Its failures are swallowed (never block a
+         recording from completing).
+      4. ``done``.
 
-    On *any* exception the recording is marked ``error`` (with the exception
-    message) and the function returns normally -- it never raises.
+    On *any* exception in steps 1-2 the recording is marked ``error`` (with the
+    exception message) and the function returns normally -- it never raises.
     """
     try:
         db.set_status(rec_id, "transcribing")
@@ -50,6 +54,12 @@ def process_recording(
         db.set_summary(rec_id, summary)
         if summary.title:
             db.update_recording(rec_id, title=summary.title)
+
+        if enrich_fn is not None:
+            try:
+                enrich_fn(rec_id)
+            except Exception:  # noqa: BLE001 - enrichment is best-effort
+                log.warning("Auto-enrich failed for recording %s", rec_id, exc_info=True)
 
         db.set_status(rec_id, "done")
     except Exception as exc:  # noqa: BLE001 - record failure, never crash caller

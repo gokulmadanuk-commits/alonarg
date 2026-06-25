@@ -261,6 +261,30 @@ class Database:
             result.append(record)
         return result
 
+    def related_recordings(self, rec_id: int, limit: int = 8) -> list[dict]:
+        """Other recordings that share this one's title (a recurring-meeting thread).
+
+        Case-insensitive exact match on the trimmed title, newest-first,
+        excluding the recording itself. Empty if the title is blank.
+        """
+        row = self._conn.execute(
+            "SELECT title FROM recordings WHERE id = ?", (rec_id,)
+        ).fetchone()
+        if row is None:
+            return []
+        title = (row["title"] or "").strip()
+        if not title:
+            return []
+        rows = self._conn.execute(
+            """
+            SELECT id, title, created_at, status, duration_s FROM recordings
+            WHERE id != ? AND lower(trim(title)) = lower(?)
+            ORDER BY created_at DESC, id DESC LIMIT ?
+            """,
+            (rec_id, title, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # --- lifecycle --------------------------------------------------------
 
     def close(self) -> None:

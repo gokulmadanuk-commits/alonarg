@@ -38,6 +38,7 @@ from alonarg import (
     pipeline,
     push,
     summarize,
+    trackers,
 )
 from alonarg.db import Database
 from alonarg.types import SummaryResult
@@ -210,6 +211,37 @@ def _merge_state(current: dict | None, updates: dict) -> dict:
     return state
 
 
+def _enrich_recording(db, rec_id: int) -> None:
+    """Auto-match a finished recording to its calendar event.
+
+    Fills the Details (people/contacts) and titles the meeting with the calendar
+    subject when one matches. Best-effort: any failure is swallowed by the caller.
+    """
+    rec = db.get_recording(rec_id)
+    if rec is None:
+        return
+    try:
+        event = calendars.find_event_for(rec.get("created_at") or "")
+    except Exception:  # noqa: BLE001 - calendar may be offline/unavailable
+        return
+    if not event:
+        return
+    people: list[str] = []
+    contacts: list[dict] = []
+    for a in event.get("attendees", []) or []:
+        name = str(a.get("name", "")).strip()
+        email = str(a.get("email", "")).strip()
+        if name and name.lower() not in {p.lower() for p in people}:
+            people.append(name)
+        if name or email:
+            contacts.append({"name": name, "email": email, "phone": ""})
+    merged = _merge_meta(rec.get("meta") or {}, {"people": people, "contacts": contacts})
+    db.set_meta(rec_id, merged)
+    subject = str(event.get("subject", "")).strip()
+    if subject:
+        db.update_recording(rec_id, title=subject)
+
+
 def _begin_recording(app) -> int:
     """Create a recording row, make its folder, and start the recorder.
 
@@ -292,6 +324,7 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             thread = threading.Thread(
                 target=pipeline.process_recording,
                 args=(db, rec_id, recording_result),
+                kwargs={"enrich_fn": lambda rid: _enrich_recording(db, rid)},
                 daemon=True,
             )
             thread.start()
@@ -345,14 +378,16 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         rec = db.get_recording(rec_id)
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
-        tt = analytics.talk_time((rec.get("transcript") or {}).get("segments"))
+        segments = (rec.get("transcript") or {}).get("segments")
         return templates.TemplateResponse(
             request,
             "detail.html",
             {
                 "rec": rec,
                 "token": config.ALONARG_TOKEN,
-                "talk_time": tt,
+                "talk_time": analytics.talk_time(segments),
+                "coaching": analytics.coaching_metrics(segments),
+                "related": db.related_recordings(rec_id),
                 "templates": summarize.template_choices(),
             },
         )
@@ -767,6 +802,54 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         else:
             autorecord.unapprove(autorecord.event_key(event))
         return {"ok": True, "enabled": enabled, "key": autorecord.event_key(event)}
+
+    @app.post("/api/calendar/brief", dependencies=[Depends(require_auth)])
+    def api_brief(subject: str = Body(""), attendees: list[str] = Body(default=None)):
+        """A short pre-meeting brief from past meetings on this subject/people."""
+        subject = (subject or "").strip()
+        attendees = attendees or []
+        seen: dict[int, dict] = {}
+        if subject:
+            for r in db.search_recordings(subject):
+                seen[r["id"]] = r
+        for a in attendees:
+            a = (a or "").strip()
+            if len(a) >= 3:
+                for r in db.search_recordings(a):
+                    seen[r["id"]] = r
+        rows = sorted(seen.values(), key=lambda r: r.get("created_at", ""), reverse=True)[:5]
+        if not rows:
+            return {"brief": "", "based_on": 0}
+        parts = []
+        for r in rows:
+            rec = db.get_recording(r["id"]) or r
+            summ = rec.get("summary") or {}
+            parts.append(
+                f"Meeting: {rec.get('title', '')} ({rec.get('created_at', '')})\n"
+                f"Summary: {summ.get('summary', '')}\n"
+                f"Action items: {'; '.join(summ.get('action_items') or []) or 'none'}"
+            )
+        try:
+            text = assistant.brief(subject, attendees, "\n\n".join(parts))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        return {"brief": text, "based_on": len(rows)}
+
+    # -- keyword trackers (across all meetings) --------------------------
+    def _tracker_counts(terms: list[str]) -> list[dict]:
+        return [{"term": t, "count": len(db.search_recordings(t))} for t in terms]
+
+    @app.get("/api/trackers", dependencies=[Depends(require_auth)])
+    def api_trackers():
+        return _tracker_counts(trackers.list_trackers())
+
+    @app.post("/api/trackers", dependencies=[Depends(require_auth)])
+    def api_add_tracker(term: str = Body(..., embed=True)):
+        return _tracker_counts(trackers.add_tracker(term))
+
+    @app.post("/api/trackers/delete", dependencies=[Depends(require_auth)])
+    def api_del_tracker(term: str = Body(..., embed=True)):
+        return _tracker_counts(trackers.remove_tracker(term))
 
     # -- system / admin info (Settings view) ------------------------------
     @app.get("/api/system/info", dependencies=[Depends(require_auth)])

@@ -78,6 +78,23 @@ def ask(question: str, context_text: str, **kw) -> str:
     return _chat(system, user, **kw).strip()
 
 
+def brief(subject: str, attendees: list[str], context_text: str, **kw) -> str:
+    """Write a short pre-meeting brief grounded in the user's past meetings."""
+    system = (
+        "You write a concise pre-meeting brief from the user's PAST meetings. In "
+        "3-5 sentences remind them what was discussed last time with these people "
+        "or on this topic, any decisions made, and then explicitly list any OPEN "
+        "action items they still owe. Use ONLY the provided history; if little is "
+        "known, say so briefly. No preamble, no headings."
+    )
+    user = (
+        f"Upcoming meeting: {subject or '(untitled)'}\n"
+        f"Attendees: {', '.join(a for a in attendees if a) or '(unknown)'}\n\n"
+        f"Past meeting history:\n{context_text}"
+    )
+    return _chat(system, user, **kw).strip()
+
+
 def draft_email(action_item: str, context_text: str = "", **kw) -> dict:
     """Draft a short professional email for an action item.
 

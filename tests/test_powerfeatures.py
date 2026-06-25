@@ -61,6 +61,79 @@ def test_state_roundtrip(tmp_path):
     db.close()
 
 
+def test_related_recordings_by_title(tmp_path):
+    db = Database(tmp_path / "r.db")
+    a = db.create_recording(status="done", title="Weekly sync")
+    b = db.create_recording(status="done", title="weekly sync ")  # case/space differ
+    c = db.create_recording(status="done", title="Something else")
+    ids = [r["id"] for r in db.related_recordings(a)]
+    assert b in ids and c not in ids and a not in ids
+    assert db.related_recordings(c) == []  # unique title -> no series
+    db.close()
+
+
+# ---- analytics.coaching_metrics ------------------------------------------
+def test_coaching_metrics():
+    segs = [
+        {"speaker": "You", "start": 0, "end": 10, "text": "Um, so what do you think? Like, basically."},
+        {"speaker": "You", "start": 10, "end": 40, "text": "I will follow up."},  # consecutive -> monologue
+        {"speaker": "Others", "start": 40, "end": 50, "text": "Sounds good."},
+    ]
+    m = analytics.coaching_metrics(segs)
+    assert m["questions_total"] == 1 and m["questions_you"] == 1
+    assert m["longest_monologue_speaker"] == "You" and m["longest_monologue_s"] == 40.0
+    assert m["filler_count"] >= 3  # um, so, like, basically
+    assert m["filler_per_min"] is not None and m["your_wpm"] is not None
+    assert analytics.coaching_metrics([]) == {}
+
+
+# ---- trackers module ------------------------------------------------------
+def test_trackers_module(tmp_path, monkeypatch):
+    from alonarg import config, trackers
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    assert trackers.list_trackers() == []
+    trackers.add_tracker("pricing")
+    trackers.add_tracker("Pricing")  # case-insensitive dedupe
+    assert trackers.list_trackers() == ["pricing"]
+    trackers.add_tracker("budget")
+    trackers.remove_tracker("PRICING")
+    assert trackers.list_trackers() == ["budget"]
+
+
+# ---- auto-enrich ----------------------------------------------------------
+def test_enrich_recording(tmp_path, monkeypatch):
+    from alonarg import calendars, server
+    db = Database(tmp_path / "e.db")
+    rid = db.create_recording(status="summarizing", title="Untitled recording")
+    monkeypatch.setattr(calendars, "find_event_for", lambda c, **k: {
+        "subject": "Q3 Planning",
+        "attendees": [{"name": "Jai", "email": "jai@x.com"}, {"name": "Sam", "email": ""}],
+    })
+    server._enrich_recording(db, rid)
+    got = db.get_recording(rid)
+    assert got["title"] == "Q3 Planning"
+    assert "Jai" in got["meta"]["people"] and "Sam" in got["meta"]["people"]
+    assert {"name": "Jai", "email": "jai@x.com", "phone": ""} in got["meta"]["contacts"]
+    db.close()
+
+
+def test_pipeline_runs_enrich(tmp_path):
+    from alonarg import pipeline
+    from alonarg.types import RecordingResult, SummaryResult, TranscriptResult
+    db = Database(tmp_path / "p.db")
+    rid = db.create_recording(status="recording")
+    called = {}
+    pipeline.process_recording(
+        db, rid, RecordingResult(mixed_path="x", duration_s=1.0, sample_rate=16000),
+        transcribe_fn=lambda mic, sysp: TranscriptResult(text="hi", segments=[], language="en"),
+        summarize_fn=lambda text, **k: SummaryResult(title="T", summary="s"),
+        enrich_fn=lambda r: called.setdefault("rid", r),
+    )
+    assert called.get("rid") == rid
+    assert db.get_recording(rid)["status"] == "done"
+    db.close()
+
+
 def test_state_migration_adds_column(tmp_path):
     # Simulate an older DB without state_json, then reopen (migration adds it).
     import sqlite3
