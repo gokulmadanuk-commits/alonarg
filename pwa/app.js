@@ -763,12 +763,156 @@ function listPanel(heading, arr) {
 }
 
 /* =====================================================================
+ * Calendar (agenda + auto-record toggles)
+ * ===================================================================== */
+let _calEventsByKey = {};
+
+async function loadCalendar() {
+  const list = $('#cal-list');
+  if (!list) return;
+  const { configured } = getConfig();
+  if (!configured) {
+    list.innerHTML = '<div class="empty-state">Set your laptop\'s backend URL in Settings to see your calendar.</div>';
+    return;
+  }
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  let data;
+  try {
+    const resp = await apiFetch('/api/calendar/events?days=7');
+    if (!resp.ok) throw new Error('status ' + resp.status);
+    data = await resp.json();
+  } catch (_) {
+    list.innerHTML = '<div class="empty-state">Couldn\'t reach your laptop. Check the connection.</div>';
+    return;
+  }
+  if (!data || !data.connected) {
+    list.innerHTML = '<div class="empty-state">Calendar not connected. Connect it from the desktop app (Settings &rarr; Calendar).</div>';
+    return;
+  }
+  renderCalendarAgenda(data.events || []);
+}
+
+function renderCalendarAgenda(events) {
+  const list = $('#cal-list');
+  _calEventsByKey = {};
+  if (!events.length) {
+    list.innerHTML = '<div class="empty-state">No meetings in the next 7 days.</div>';
+    return;
+  }
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const groups = [];
+  const byKey = {};
+  events.forEach((ev) => {
+    _calEventsByKey[ev.key] = ev;
+    const s = new Date(ev.start);
+    if (isNaN(s.getTime())) return;
+    const dayStart = new Date(s); dayStart.setHours(0, 0, 0, 0);
+    const dk = dayStart.toISOString().slice(0, 10);
+    if (!byKey[dk]) { byKey[dk] = { date: dayStart, items: [] }; groups.push(byKey[dk]); }
+    byKey[dk].items.push(ev);
+  });
+  groups.sort((a, b) => a.date - b.date);
+
+  let html = '';
+  for (const g of groups) {
+    const isToday = g.date.getTime() === today.getTime();
+    const label = (isToday ? 'Today · ' : '') +
+      g.date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    html += '<div class="cal-day"><div class="cal-day-head">' + escapeHtml(label) + '</div>';
+    for (const ev of g.items) {
+      const time = fmtTimeRange(ev);
+      html +=
+        '<div class="cal-ev' + (ev.auto_record ? ' armed' : '') + '" data-key="' + escapeHtml(ev.key) + '">' +
+        '<div class="cal-ev-info">' +
+        '<div class="cal-ev-time">' + escapeHtml(time) + '</div>' +
+        '<div class="cal-ev-title">' + escapeHtml(ev.subject || '(no title)') + '</div>' +
+        '</div>' +
+        '<label class="switch" title="Auto-record"><input type="checkbox" data-key="' + escapeHtml(ev.key) + '"' +
+        (ev.auto_record ? ' checked' : '') + '><span class="slider"></span></label>' +
+        '</div>';
+    }
+    html += '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function fmtTimeRange(ev) {
+  const opt = { hour: 'numeric', minute: '2-digit' };
+  const s = new Date(ev.start), e = new Date(ev.end);
+  const ss = isNaN(s.getTime()) ? '' : s.toLocaleTimeString(undefined, opt);
+  const ee = isNaN(e.getTime()) ? '' : e.toLocaleTimeString(undefined, opt);
+  return ss + (ee ? ' – ' + ee : '');
+}
+
+async function onAutoRecordToggle(cb) {
+  const ev = _calEventsByKey[cb.getAttribute('data-key')];
+  if (!ev) return;
+  const enabled = cb.checked;
+  cb.disabled = true;
+  try {
+    const resp = await apiFetch('/api/calendar/autorecord', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: ev, enabled: enabled }),
+    });
+    if (!resp.ok) throw new Error('status ' + resp.status);
+    ev.auto_record = enabled;
+    const row = cb.closest('.cal-ev');
+    if (row) row.classList.toggle('armed', enabled);
+    toast(enabled ? 'Will auto-record this meeting' : 'Auto-record off');
+  } catch (_) {
+    cb.checked = !enabled;
+    toast('Could not update — check the connection.');
+  }
+  cb.disabled = false;
+}
+
+/* =====================================================================
+ * Ask (local AI across all meetings)
+ * ===================================================================== */
+async function doAsk() {
+  const input = $('#ask-input');
+  const out = $('#ask-answer');
+  const btn = $('#ask-btn');
+  const q = (input.value || '').trim();
+  if (!q) return;
+  const { configured } = getConfig();
+  out.hidden = false;
+  out.className = 'ask-answer';
+  if (!configured) {
+    out.className = 'ask-answer fail';
+    out.textContent = 'Set your laptop\'s backend URL in Settings first.';
+    return;
+  }
+  out.textContent = 'Thinking…';
+  btn.disabled = true;
+  try {
+    const resp = await apiFetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      out.textContent = data.answer || '(no answer)';
+    } else {
+      out.className = 'ask-answer fail';
+      out.textContent = data.detail || 'Could not reach the local AI. Make sure your laptop and Ollama are running.';
+    }
+  } catch (_) {
+    out.className = 'ask-answer fail';
+    out.textContent = 'Could not reach your laptop. Check the connection.';
+  }
+  btn.disabled = false;
+}
+
+/* =====================================================================
  * View / tab navigation
  * ===================================================================== */
 let currentTab = 'record';
 
 function showView(view) {
-  const views = ['record', 'recordings', 'detail', 'settings'];
+  const views = ['record', 'recordings', 'detail', 'calendar', 'ask', 'settings'];
   for (const v of views) {
     const el = document.getElementById('view-' + v);
     if (el) el.hidden = v !== view;
@@ -790,6 +934,11 @@ function switchTab(tab) {
     loadSettingsForm();
   } else if (tab === 'record') {
     pollLaptopStatus();
+  } else if (tab === 'calendar') {
+    loadCalendar();
+  } else if (tab === 'ask') {
+    const i = $('#ask-input');
+    if (i) i.focus();
   }
 }
 
@@ -1013,6 +1162,19 @@ function init() {
   $('#laptop-rec-btn').addEventListener('click', toggleLaptopRecording);
   $('#nudge-enable-btn').addEventListener('click', enableNudges);
   $('#nudge-test-btn').addEventListener('click', testNudge);
+
+  // Calendar
+  $('#cal-refresh').addEventListener('click', loadCalendar);
+  $('#cal-list').addEventListener('change', (e) => {
+    const cb = e.target.closest('input[type="checkbox"][data-key]');
+    if (cb) onAutoRecordToggle(cb);
+  });
+
+  // Ask
+  $('#ask-btn').addEventListener('click', doAsk);
+  $('#ask-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doAsk(); }
+  });
 
   // Connection pill -> jump to settings
   $('#conn-pill').addEventListener('click', () => switchTab('settings'));

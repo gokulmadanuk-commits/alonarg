@@ -329,3 +329,48 @@ body {
   display: flex; flex-direction: column; gap: 8px;
   margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
 }
+
+/* ---------------- toggle switch ---------------- */
+.switch { position: relative; display: inline-block; width: 38px; height: 22px; flex: 0 0 auto; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; inset: 0; background: #cbcabf; border-radius: 999px; transition: background 0.15s ease; cursor: pointer; }
+.switch .slider::before {
+  content: ""; position: absolute; height: 18px; width: 18px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; transition: transform 0.15s ease; box-shadow: var(--shadow);
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+
+/* ---------------- calendar (agenda) ---------------- */
+.cal-sub { margin: 0 0 16px; font-size: 13px; }
+.cal-day { margin-bottom: 18px; }
+.cal-day-head {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  color: var(--text-muted); margin: 0 0 8px;
+}
+.cal-ev {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--shadow-card);
+}
+.cal-ev.armed { background: rgba(var(--accent-rgb), 0.08); border-color: var(--accent); }
+.cal-ev-info { min-width: 0; flex: 1; }
+.cal-ev-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cal-ev-title { font-size: 15px; font-weight: 600; color: var(--text); word-break: break-word; margin-top: 2px; }
+
+/* ---------------- ask ---------------- */
+.ask-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.ask-row .input { flex: 1; }
+.ask-answer {
+  padding: 14px 16px; border-radius: var(--radius);
+  background: var(--bg-card); border: 1px solid var(--border); box-shadow: var(--shadow-card);
+  white-space: pre-wrap; color: var(--text); font-size: 15px; line-height: 1.55;
+}
+.ask-answer.fail {
+  background: rgba(var(--record-rgb), 0.08);
+  border-color: rgba(var(--record-rgb), 0.30);
+  color: var(--record-hover);
+}
+
+/* ---------------- tab svg icons ---------------- */
+.tab-ico svg { display: block; }
