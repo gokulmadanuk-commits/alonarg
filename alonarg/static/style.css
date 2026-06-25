@@ -833,6 +833,48 @@ body {
   .brief-detail-side { position: static; }
 }
 
+/* ===== People (relationship memory) ===== */
+.people-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.person-item {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 16px; box-shadow: var(--shadow-card); cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.person-item:hover { border-color: #d8d2c4; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08); }
+.person-avatar {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 14px; font-weight: 700;
+  background: rgba(var(--accent-rgb), 0.14); color: var(--accent-hover);
+}
+.person-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.person-name { font-size: 16px; font-weight: 600; color: var(--text); }
+.person-meta { font-size: 13px; color: var(--text-muted); }
+.person-open { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--accent); background: rgba(var(--accent-rgb), 0.12); padding: 3px 10px; border-radius: 999px; }
+
+.person-back { margin-bottom: 14px; }
+.person-detail { display: flex; flex-direction: column; gap: 4px; }
+.person-d-head { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 22px; box-shadow: var(--shadow-card); }
+.person-d-name { margin: 0; font-size: 22px; color: var(--text); }
+.person-d-contact { margin-top: 6px; font-size: 14px; }
+.person-cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; margin-top: 16px; align-items: start; }
+.person-col { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; box-shadow: var(--shadow-card); }
+.person-actions, .person-emails, .person-meetings { list-style: none; margin: 0 0 6px; padding: 0; }
+.person-actions li { padding: 7px 0; border-bottom: 1px solid var(--border); line-height: 1.5; }
+.person-actions li:last-child { border-bottom: none; }
+.person-meetings li { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.person-meetings li:last-child { border-bottom: none; }
+.person-meetings a, .person-actions a { color: var(--accent); text-decoration: none; }
+.person-meetings a:hover, .person-actions a:hover { text-decoration: underline; }
+.person-emails li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.person-emails li:last-child { border-bottom: none; }
+.pe-subj { font-weight: 600; color: var(--text); font-size: 14px; }
+.pe-meta { font-size: 12px; margin-top: 1px; }
+.pe-prev { font-size: 13px; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 880px) {
+  .person-cols { grid-template-columns: 1fr; }
+}
+
 /* ===== Keyword trackers (settings) ===== */
 .tracker-add { display: flex; gap: 8px; margin: 6px 0 12px; }
 .trackers-list { display: flex; flex-direction: column; gap: 6px; }

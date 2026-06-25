@@ -65,6 +65,14 @@ GRAPH_AUTHORITY = os.environ.get("ALONARG_GRAPH_AUTHORITY", "https://login.micro
 ALONARG_TOKEN = os.environ.get("ALONARG_TOKEN", "")
 # Comma-separated list of allowed CORS origins, or "*" for any.
 ALONARG_CORS_ORIGINS = os.environ.get("ALONARG_CORS_ORIGINS", "*")
+# Your own email address(es), comma-separated — excluded from the People view so
+# you don't get a card for yourself. The signed-in Graph account is auto-excluded.
+ALONARG_SELF_EMAILS = os.environ.get("ALONARG_SELF_EMAILS", "")
+
+
+def self_emails() -> list[str]:
+    """Parsed list of the user's own email addresses (lowercased)."""
+    return [e.strip().lower() for e in (ALONARG_SELF_EMAILS or "").split(",") if e.strip()]
 
 
 def base_url() -> str:

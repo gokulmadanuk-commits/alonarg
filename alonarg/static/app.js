@@ -211,7 +211,7 @@
   }
 
   // ---- left-nav view switching (recordings / calendar / settings) ------
-  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", briefs: "Briefs", tasks: "Tasks", settings: "Settings" };
+  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", briefs: "Briefs", people: "People", tasks: "Tasks", settings: "Settings" };
   function currentView() {
     const h = (location.hash || "").replace("#", "");
     return VIEW_TITLES[h] ? h : "recordings";
@@ -226,8 +226,81 @@
     if (main) main.classList.toggle("cal-wide", name === "calendar");
     if (name === "calendar") loadCalendar();
     if (name === "briefs") loadBriefs();
+    if (name === "people") loadPeople();
     if (name === "tasks") loadTasks();
     if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); }
+  }
+
+  // ---- people (relationship memory) ----------------------------------
+  function fmtDay(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+  async function loadPeople() {
+    const body = document.getElementById("people-body");
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    const { ok, body: data } = await jsonFetch("/api/people");
+    if (!ok || !Array.isArray(data)) { body.innerHTML = '<p class="ask-answer error">Could not load people.</p>'; return; }
+    if (!data.length) {
+      body.innerHTML = '<div class="empty-state"><p>No people yet.</p>' +
+        '<p class="muted">People appear here once your meetings have attendees — use <strong>Sync Outlook</strong> or <strong>Detect</strong> on a meeting, or connect your calendar.</p></div>';
+      return;
+    }
+    let html = '<ul class="people-list">';
+    data.forEach((p) => {
+      const initials = (p.name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
+      const bits = [p.meeting_count + " meeting" + (p.meeting_count !== 1 ? "s" : "")];
+      if (p.last_met) bits.push("last " + fmtDay(p.last_met));
+      html +=
+        '<li class="person-item" data-id="' + esc(p.id) + '">' +
+          '<span class="person-avatar">' + esc(initials || "?") + "</span>" +
+          '<span class="person-main"><span class="person-name">' + esc(p.name) + "</span>" +
+            '<span class="person-meta">' + esc(bits.join(" · ")) + "</span></span>" +
+          (p.open_actions ? '<span class="person-open">' + p.open_actions + " open</span>" : "") +
+          '<span class="bli-chev" aria-hidden="true">›</span>' +
+        "</li>";
+    });
+    html += "</ul>";
+    body.innerHTML = html;
+  }
+  async function openPersonDetail(id) {
+    const body = document.getElementById("people-body");
+    body.innerHTML = '<button class="btn btn-ghost person-back" type="button">&larr; All people</button><p class="muted">Loading…</p>';
+    const { ok, body: p } = await jsonFetch("/api/people/detail?id=" + encodeURIComponent(id));
+    if (!ok || !p) { body.innerHTML = '<button class="btn btn-ghost person-back" type="button">&larr; All people</button><p class="ask-answer error">Could not load this person.</p>'; return; }
+    const meetings = (p.meetings || []).map((m) =>
+      '<li><a href="/recording/' + m.id + '">' + esc(m.title) + "</a>" +
+      '<span class="muted"> · ' + esc(fmtDay(m.created_at)) + "</span></li>").join("") || '<li class="muted">No meetings.</li>';
+    const actions = (p.open_actions || []).length
+      ? (p.open_actions || []).map((a) =>
+          '<li><span class="ai-text">' + esc(a.item) + "</span>" +
+          ' <a class="muted" href="/recording/' + a.recording_id + '">' + esc(a.title) + "</a></li>").join("")
+      : '<li class="muted">Nothing outstanding.</li>';
+    const emails = (p.emails || []).length
+      ? (p.emails || []).map((m) =>
+          '<li><div class="pe-subj">' + esc(m.subject || "(no subject)") + "</div>" +
+          '<div class="muted pe-meta">' + esc((m.received || "").slice(0, 10)) + " · " + esc(m.from || "") + "</div>" +
+          (m.preview ? '<div class="pe-prev muted">' + esc(m.preview) + "</div>" : "") + "</li>").join("")
+      : (p.mail ? '<li class="muted">No recent emails found.</li>'
+                : '<li class="muted">Connect email in <a href="/#settings">Settings</a> to see recent threads.</li>');
+    const contact = [];
+    if (p.email) contact.push('<a class="bp-email" href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>");
+    if (p.phone) contact.push('<span class="muted">' + esc(p.phone) + "</span>");
+    body.innerHTML =
+      '<button class="btn btn-ghost person-back" type="button">&larr; All people</button>' +
+      '<div class="person-detail">' +
+        '<div class="person-d-head"><h2 class="person-d-name">' + esc(p.name) + "</h2>" +
+          (contact.length ? '<div class="person-d-contact">' + contact.join(" · ") + "</div>" : "") + "</div>" +
+        '<div class="person-cols">' +
+          '<div class="person-col"><h3 class="brief-h">Open items</h3><ul class="person-actions">' + actions + "</ul>" +
+            '<h3 class="brief-h">Recent emails</h3><ul class="person-emails">' + emails + "</ul></div>" +
+          '<aside class="person-col person-side"><h3 class="brief-h">Meetings (' + (p.meeting_count || 0) + ')</h3>' +
+            '<ul class="person-meetings">' + meetings + "</ul></aside>" +
+        "</div>" +
+      "</div>";
   }
 
   // ---- pre-meeting briefs hub (list -> detail) ------------------------
@@ -1316,6 +1389,14 @@
   // tasks: open-only filter
   const tasksOpenOnly = document.getElementById("tasks-open-only");
   if (tasksOpenOnly) tasksOpenOnly.addEventListener("change", loadTasks);
+
+  // people: open detail / back (delegated)
+  const peopleBody = document.getElementById("people-body");
+  if (peopleBody) peopleBody.addEventListener("click", (e) => {
+    if (e.target.closest(".person-back")) { loadPeople(); return; }
+    const item = e.target.closest(".person-item");
+    if (item) openPersonDetail(item.dataset.id);
+  });
 
   // briefs: open detail / back / prepare (delegated)
   const briefsBody = document.getElementById("briefs-body");

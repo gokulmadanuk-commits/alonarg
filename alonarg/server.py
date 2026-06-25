@@ -37,6 +37,7 @@ from alonarg import (
     config,
     ingest,
     msgraph,
+    people,
     pipeline,
     push,
     summarize,
@@ -1053,6 +1054,32 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             "calendar_connected": msgraph.is_signed_in(),
             "auto_record_count": len(autorecord.list_approved()),
         }
+
+    # -- people (relationship memory) ------------------------------------
+    def _self_emails() -> set:
+        emails = set(config.self_emails())
+        if msgraph.is_signed_in():
+            acct = msgraph.account_name()
+            if acct:
+                emails.add(acct.lower())
+        return emails
+
+    @app.get("/api/people", dependencies=[Depends(require_auth)])
+    def api_people():
+        return people.aggregate(db, _self_emails())
+
+    @app.get("/api/people/detail", dependencies=[Depends(require_auth)])
+    def api_person_detail(id: str):
+        p = people.person_detail(db, id, _self_emails())
+        if p is None:
+            raise HTTPException(status_code=404, detail="Person not found")
+        emails = []
+        if p.get("email") and msgraph.mail_available():
+            try:
+                emails = msgraph.read_messages(p["email"], top=5)
+            except Exception:  # noqa: BLE001
+                emails = []
+        return {**p, "emails": emails, "mail": msgraph.mail_available()}
 
     # -- audio playback ---------------------------------------------------
     @app.get("/audio/{rec_id}", dependencies=[Depends(require_auth)])
