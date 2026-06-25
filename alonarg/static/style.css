@@ -313,6 +313,12 @@ body {
   color: var(--text);
 }
 .ask-answer.error { background: rgba(220, 38, 38, 0.06); border-color: rgba(220, 38, 38, 0.25); color: var(--danger); }
+.ask-text { white-space: pre-wrap; }
+.ask-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ask-sources-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+.ask-source { font-size: 12.5px; color: var(--accent); text-decoration: none; background: rgba(var(--accent-rgb), 0.1); padding: 3px 9px; border-radius: 999px; }
+.ask-source:hover { background: rgba(var(--accent-rgb), 0.18); }
+code { background: var(--bg-subtle); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; font-family: ui-monospace, "Cascadia Code", "Consolas", monospace; }
 
 .detail-toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
 

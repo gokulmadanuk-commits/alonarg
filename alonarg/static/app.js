@@ -228,7 +228,22 @@
     if (name === "briefs") loadBriefs();
     if (name === "people") loadPeople();
     if (name === "tasks") loadTasks();
-    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); }
+    if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); loadBrainStatus(); }
+  }
+
+  // ---- knowledge base (semantic index) status ------------------------
+  async function loadBrainStatus() {
+    const el = document.getElementById("brain-status");
+    if (!el) return;
+    const { ok, body } = await jsonFetch("/api/brain/status");
+    if (!ok || !body) { el.textContent = "Could not load index status."; return; }
+    if (!body.available) {
+      el.innerHTML = "Embedding model not installed. Run <code>ollama pull " +
+        esc(body.model || "nomic-embed-text") + "</code>, then Rebuild.";
+      return;
+    }
+    el.textContent = body.indexed + " of " + body.total + " meetings indexed · " +
+      body.chunks + " snippets · " + body.model;
   }
 
   // ---- people (relationship memory) ----------------------------------
@@ -963,7 +978,17 @@
       body: JSON.stringify(payload),
     });
     if (ok && body) {
-      answerEl.textContent = body.answer || "(no answer)";
+      answerEl.className = "ask-answer";
+      let html = '<div class="ask-text">' + esc(body.answer || "(no answer)") + "</div>";
+      const sources = body.sources || [];
+      if (sources.length) {
+        html += '<div class="ask-sources"><span class="ask-sources-label">Sources</span>' +
+          sources.map((s) => {
+            const t = s.start_s != null ? "?t=" + Math.floor(s.start_s) : "";
+            return '<a class="ask-source" href="/recording/' + s.recording_id + t + '" title="' + esc(s.snippet || "") + '">[' + s.n + "] " + esc(s.title) + "</a>";
+          }).join("") + "</div>";
+      }
+      answerEl.innerHTML = html;
     } else {
       answerEl.className = "ask-answer error";
       answerEl.textContent = (body && body.detail) || "Could not reach the local AI. Make sure the engine and Ollama are running.";
@@ -1284,6 +1309,25 @@
         rows.forEach((r) => r.classList.toggle("active", r === active));
       });
     }
+
+    // Deep-link: /recording/{id}?t=SECONDS (from a cited source) -> seek + scroll.
+    const t = parseFloat(new URLSearchParams(location.search).get("t"));
+    if (!isNaN(t)) {
+      if (audio) {
+        const seek = () => { try { audio.currentTime = t; } catch (e) { /* not seekable yet */ } };
+        seek();
+        audio.addEventListener("loadedmetadata", seek, { once: true });
+      }
+      const rows = Array.from(segs.querySelectorAll(".tseg"));
+      let target = rows.find((r) => t >= (parseFloat(r.dataset.start) || 0) && t < (parseFloat(r.dataset.end) || 0));
+      if (!target) {
+        rows.forEach((r) => { if ((parseFloat(r.dataset.start) || 0) <= t) target = r; });
+      }
+      if (target) {
+        target.classList.add("active");
+        setTimeout(() => target.scrollIntoView({ block: "center", behavior: "smooth" }), 120);
+      }
+    }
   }
 
   // ---- regenerate summary with a template (detail) --------------------
@@ -1416,6 +1460,16 @@
     trackerAddBtn.addEventListener("click", doAdd);
     trackerInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
   }
+
+  // settings: rebuild semantic index
+  const brainReindex = document.getElementById("brain-reindex");
+  if (brainReindex) brainReindex.addEventListener("click", async () => {
+    brainReindex.disabled = true;
+    const { ok, body } = await jsonFetch("/api/brain/reindex", { method: "POST" });
+    brainReindex.disabled = false;
+    if (ok && body && body.started) { toast("Rebuilding index in the background…"); setTimeout(loadBrainStatus, 2000); }
+    else toast((body && body.detail) || "Could not start reindex");
+  });
 
   // settings: send test push
   const pushTestBtn = document.getElementById("push-test");

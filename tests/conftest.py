@@ -18,6 +18,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
+@pytest.fixture(autouse=True)
+def _no_embeddings(monkeypatch):
+    """Keep tests hermetic: the semantic 'brain' is off unless a test opts in.
+
+    Otherwise search/ask endpoints would call the local Ollama embeddings server.
+    """
+    from alonarg import brain, embeddings
+    monkeypatch.setattr(embeddings, "available", lambda: False)
+    monkeypatch.setattr(brain, "available", lambda: False)
+
+
 @pytest.fixture()
 def tmp_db_path(tmp_path: Path) -> Path:
     return tmp_path / "test.db"

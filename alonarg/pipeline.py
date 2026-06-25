@@ -29,6 +29,7 @@ def process_recording(
     transcribe_fn=transcribe_mod.transcribe,
     summarize_fn=summarize_mod.summarize,
     enrich_fn=None,
+    index_fn=None,
 ) -> None:
     """Transcribe, summarize, and finalize a recording.
 
@@ -60,6 +61,12 @@ def process_recording(
                 enrich_fn(rec_id)
             except Exception:  # noqa: BLE001 - enrichment is best-effort
                 log.warning("Auto-enrich failed for recording %s", rec_id, exc_info=True)
+
+        if index_fn is not None:
+            try:
+                index_fn(rec_id)
+            except Exception:  # noqa: BLE001 - semantic indexing is best-effort
+                log.warning("Semantic indexing failed for recording %s", rec_id, exc_info=True)
 
         db.set_status(rec_id, "done")
     except Exception as exc:  # noqa: BLE001 - record failure, never crash caller
