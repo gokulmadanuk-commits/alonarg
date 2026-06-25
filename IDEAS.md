@@ -28,6 +28,16 @@ Everything here runs on my laptop with the local model (no API costs).
 - **Tasks hub** — every action item across all meetings, grouped by meeting, tick to
   complete, "open only" filter.
 - **Tags + pin** — tag meetings, filter the dashboard by tag, pin favourites to the top.
+- **Warm-paper + emerald** colour palette (single-source via CSS vars).
+- **Self-coaching metrics** — questions asked, longest monologue, filler words/min, your
+  speaking pace, on the meeting page.
+- **Recurring-series thread** — "This series" panel links other meetings with the same title.
+- **Auto-enrich on processing** — new recordings are auto-matched to their calendar event
+  (people/contacts + real meeting title) as they finish.
+- **Keyword trackers** — watch terms across all meetings (Settings), with per-term meeting
+  counts and click-through to search.
+- **Pre-meeting brief** — in the calendar popover, "Brief me" writes a recap from past
+  meetings on that subject/people (incl. still-open action items), using the local model.
 
 ## 🔨 In progress
 - (nothing right now)
@@ -38,18 +48,8 @@ Everything here runs on my laptop with the local model (no API costs).
 
 ## 💡 Later / someday — with local feasibility (from competitor research, 2026)
 Rated for building **fully local & free** on the current stack (faster-whisper + Ollama
-`llama3.2:3b` + SQLite). Easy/Medium are the realistic wins.
-- **Pre-meeting brief** (Easy) — before a meeting, assemble attendees + prior summaries for
-  the same people/series and have the LLM write a one-paragraph "here's where you left off";
-  push to the phone via the existing nudge channel. *(Granola/Fellow.)*
-- **Auto-enrich on processing** (Easy) — run calendar-match (and optionally Detect) during
-  the pipeline so new meetings arrive pre-titled with people/contacts.
-- **Keyword / topic trackers across meetings** (Easy) — define tracked terms, count
-  mentions across all meetings over the existing search index. *(Fireflies/Avoma.)*
-- **Recurring-series grouping** (Easy) — group meetings by the Graph recurrence/series id
-  (a "thread" per recurring meeting). *(Fellow/tl;dv.)*
-- **Self-coaching metrics** (Easy) — questions asked, longest monologue, filler-word count
-  from the transcript (per-speaker via the mic/system split). *(Avoma.)*
+`llama3.2:3b` + SQLite). Easy/Medium are the realistic wins. *(The "Easy wins" batch above
+is now shipped.)*
 - **Topic / chapter segmentation + time-per-topic** (Medium) — LLM segments the transcript
   into topics with timestamps (map-reduce for long calls); clickable chapters reuse the
   transcript-sync UI. *(Avoma/tl;dv.)*
