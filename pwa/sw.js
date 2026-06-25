@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const CACHE = 'alonarg-shell-v8';
+const CACHE = 'alonarg-shell-v9';
 
 const SHELL = [
   './',
