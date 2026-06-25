@@ -188,7 +188,7 @@ def test_dashboard_renders(ctx):
     assert "Rendered Meeting" in r.text
     # left-nav shell with the three views
     assert 'class="sidebar"' in r.text
-    for view in ("recordings", "calendar", "tasks", "settings"):
+    for view in ("recordings", "calendar", "briefs", "tasks", "settings"):
         assert f'data-view="{view}"' in r.text
 
 

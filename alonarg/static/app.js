@@ -211,7 +211,7 @@
   }
 
   // ---- left-nav view switching (recordings / calendar / settings) ------
-  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", tasks: "Tasks", settings: "Settings" };
+  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", briefs: "Briefs", tasks: "Tasks", settings: "Settings" };
   function currentView() {
     const h = (location.hash || "").replace("#", "");
     return VIEW_TITLES[h] ? h : "recordings";
@@ -225,8 +225,91 @@
     const main = document.querySelector(".content-main");
     if (main) main.classList.toggle("cal-wide", name === "calendar");
     if (name === "calendar") loadCalendar();
+    if (name === "briefs") loadBriefs();
     if (name === "tasks") loadTasks();
     if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); }
+  }
+
+  // ---- pre-meeting briefs hub -----------------------------------------
+  function fmtBriefWhen(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+  async function loadBriefs() {
+    const body = document.getElementById("briefs-body");
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    const { ok, body: data } = await jsonFetch("/api/briefs");
+    if (!ok || !data) { body.innerHTML = '<p class="ask-answer error">Could not load briefs.</p>'; return; }
+    if (!data.connected) {
+      body.innerHTML = '<div class="empty-state"><p>Calendar not connected.</p><p class="muted">Connect it in <a href="/#settings">Settings</a>.</p></div>';
+      return;
+    }
+    renderBriefs(data.briefs || [], data.mail);
+  }
+  function renderBriefs(items, mailOn) {
+    const body = document.getElementById("briefs-body");
+    if (!items.length) {
+      body.innerHTML = '<div class="empty-state"><p>No meetings flagged for recording.</p>' +
+        '<p class="muted">Turn on <strong>Auto-record</strong> for a meeting in <a href="/#calendar">Calendar</a> and its brief will appear here.</p></div>';
+      return;
+    }
+    body.innerHTML = "";
+    if (!mailOn) {
+      const note = document.createElement("p");
+      note.className = "muted briefs-mailnote";
+      note.innerHTML = 'Tip: briefs use the invite + past meetings now. Connect email in <a href="/#settings">Settings</a> to include recent threads with attendees.';
+      body.appendChild(note);
+    }
+    items.forEach((it) => {
+      const sec = document.createElement("section");
+      sec.className = "panel brief-card";
+      sec.dataset.key = it.key;
+      const sources = [];
+      if (it.based_on) sources.push(it.based_on + " past meeting" + (it.based_on !== 1 ? "s" : ""));
+      if (it.emails_used) sources.push(it.emails_used + " email" + (it.emails_used !== 1 ? "s" : ""));
+      const sub = (it.generated_at ? "Prepared " + fmtBriefWhen(it.generated_at) : "Not prepared yet") +
+        (sources.length ? " · from " + sources.join(" + ") : "");
+      sec.innerHTML =
+        '<div class="brief-head">' +
+          '<div><h3 class="brief-title">' + esc(it.subject || "(no title)") + "</h3>" +
+          '<div class="brief-when">' + esc(fmtBriefWhen(it.start)) + "</div></div>" +
+          '<button class="btn brief-gen" type="button">' + (it.has_brief ? "Refresh" : "Prepare brief") + "</button>" +
+        "</div>" +
+        (it.has_brief
+          ? '<div class="brief-text">' + esc(it.brief) + "</div><div class=\"brief-sub muted\">" + esc(sub) + "</div>"
+          : '<p class="muted brief-empty">No brief yet — tap “Prepare brief”.</p>');
+      body.appendChild(sec);
+    });
+  }
+  async function generateBrief(key, btn) {
+    const card = btn.closest(".brief-card");
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = "Preparing…";
+    const { ok, body } = await jsonFetch("/api/briefs/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: key }),
+    });
+    btn.disabled = false; btn.textContent = orig;
+    if (ok && body && body.brief) {
+      const sources = [];
+      if (body.based_on) sources.push(body.based_on + " past meeting" + (body.based_on !== 1 ? "s" : ""));
+      if (body.emails_used) sources.push(body.emails_used + " email" + (body.emails_used !== 1 ? "s" : ""));
+      const sub = "Prepared just now" + (sources.length ? " · from " + sources.join(" + ") : "");
+      const empty = card.querySelector(".brief-empty");
+      if (empty) empty.remove();
+      let textEl = card.querySelector(".brief-text");
+      if (!textEl) { textEl = document.createElement("div"); textEl.className = "brief-text"; card.appendChild(textEl); }
+      textEl.textContent = body.brief;
+      let subEl = card.querySelector(".brief-sub");
+      if (!subEl) { subEl = document.createElement("div"); subEl.className = "brief-sub muted"; card.appendChild(subEl); }
+      subEl.textContent = sub;
+      btn.textContent = "Refresh";
+    } else if (ok && body && !body.brief) {
+      toast("Not enough info to brief this meeting yet");
+    } else {
+      toast((body && body.detail) || "Could not prepare the brief (is Ollama running?)");
+    }
   }
 
   // ---- keyword trackers (settings) -----------------------------------
@@ -540,17 +623,13 @@
     btn.disabled = true;
     out.hidden = false;
     out.textContent = "Thinking…";
-    const attendees = (ev.attendees || []).map((a) => a.name || a.email).filter(Boolean);
-    const emails = (ev.attendees || []).map((a) => a.email).filter(Boolean);
     const { ok, body } = await jsonFetch("/api/calendar/brief", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: ev.subject || "", attendees: attendees, emails: emails }),
+      body: JSON.stringify({ event: ev }),
     });
     btn.disabled = false;
     if (ok && body) {
-      out.textContent = body.based_on === 0
-        ? "No past meetings on this topic or with these people yet."
-        : (body.brief || "(no brief)");
+      out.textContent = body.brief || "Not enough information to brief this meeting yet.";
     } else {
       out.textContent = (body && body.detail) || "Could not generate (is Ollama running?).";
     }
@@ -1192,6 +1271,15 @@
   // tasks: open-only filter
   const tasksOpenOnly = document.getElementById("tasks-open-only");
   if (tasksOpenOnly) tasksOpenOnly.addEventListener("change", loadTasks);
+
+  // briefs: prepare/refresh (delegated)
+  const briefsBody = document.getElementById("briefs-body");
+  if (briefsBody) briefsBody.addEventListener("click", (e) => {
+    const b = e.target.closest(".brief-gen");
+    if (!b) return;
+    const card = b.closest(".brief-card");
+    if (card) generateBrief(card.dataset.key, b);
+  });
 
   // settings: keyword trackers
   const trackerAddBtn = document.getElementById("tracker-add-btn");
