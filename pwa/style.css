@@ -381,6 +381,18 @@ body {
 .brief-text { margin-top: 12px; color: var(--text); line-height: 1.6; white-space: pre-wrap; font-size: 14px; }
 .brief-sub { margin-top: 10px; font-size: 12px; }
 .brief-empty { margin: 12px 0 0; }
+.brief-headline { margin-top: 12px; font-size: 15px; font-weight: 500; color: var(--text); line-height: 1.5; }
+.brief-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 14px 0 6px; }
+.brief-points, .brief-actions-list { margin: 0; padding-left: 20px; }
+.brief-points li, .brief-actions-list li { margin: 6px 0; line-height: 1.5; color: var(--text); font-size: 14px; }
+.brief-actions-list { list-style: none; padding-left: 0; }
+.brief-actions-list li { position: relative; padding-left: 24px; }
+.brief-actions-list li::before { content: "\2610"; position: absolute; left: 0; top: -1px; color: var(--accent); }
+.brief-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.brief-people li { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.bp-name { font-weight: 600; color: var(--text); }
+.bp-email { color: var(--accent); text-decoration: none; font-size: 13px; word-break: break-all; }
+.bp-email:hover { text-decoration: underline; }
 
 /* ---------------- tab svg icons ---------------- */
 .tab-ico svg { display: block; }

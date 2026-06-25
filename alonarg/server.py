@@ -244,6 +244,14 @@ def _enrich_recording(db, rec_id: int) -> None:
         db.update_recording(rec_id, title=subject)
 
 
+def _empty_brief() -> dict:
+    return {"headline": "", "points": [], "actions": []}
+
+
+def _has_brief(b) -> bool:
+    return isinstance(b, dict) and bool(b.get("headline") or b.get("points") or b.get("actions"))
+
+
 def build_brief(db, event: dict) -> dict:
     """Compose a pre-meeting brief from the calendar invite, past meetings, and
     recent emails with the attendees. Works even with no prior recordings.
@@ -324,7 +332,7 @@ def build_brief(db, event: dict) -> dict:
         sections.append("RECENT EMAILS:\n" + "\n\n".join(email_parts))
 
     if not sections:
-        return {"brief": "", "based_on": 0, "emails_used": 0, "mail_available": mail_ok}
+        return {"brief": _empty_brief(), "based_on": 0, "emails_used": 0, "mail_available": mail_ok}
     text = assistant.brief(subject, names, "\n\n".join(sections))
     return {"brief": text, "based_on": len(rows), "emails_used": len(email_parts), "mail_available": mail_ok}
 
@@ -968,16 +976,21 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             if key not in approved:
                 continue
             c = cached.get(key) or {}
+            brief = c.get("brief")
+            if not isinstance(brief, dict):  # tolerate older (string) cache entries
+                brief = _empty_brief()
             items.append({
                 "key": key,
                 "subject": ev.get("subject", ""),
                 "start": ev.get("start", ""),
                 "end": ev.get("end", ""),
-                "brief": c.get("brief", ""),
+                "attendees": ev.get("attendees", []) or [],
+                "organizer": ev.get("organizer", ""),
+                "brief": brief,
                 "generated_at": c.get("generated_at", ""),
                 "based_on": c.get("based_on", 0),
                 "emails_used": c.get("emails_used", 0),
-                "has_brief": bool(c.get("brief")),
+                "has_brief": _has_brief(brief),
             })
         items.sort(key=lambda x: x.get("start", ""))
         return {"connected": connected, "mail": msgraph.mail_available(), "briefs": items}
@@ -1003,7 +1016,11 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
             "brief": result["brief"], "based_on": result["based_on"],
             "emails_used": result["emails_used"], "generated_at": generated_at,
         })
-        return {**result, "key": key, "generated_at": generated_at}
+        return {
+            **result, "key": key, "generated_at": generated_at,
+            "subject": ev.get("subject", ""), "start": ev.get("start", ""),
+            "attendees": ev.get("attendees", []) or [], "has_brief": _has_brief(result["brief"]),
+        }
 
     # -- keyword trackers (across all meetings) --------------------------
     def _tracker_counts(terms: list[str]) -> list[dict]:

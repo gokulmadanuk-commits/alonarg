@@ -187,14 +187,14 @@ def test_build_brief_from_invite_only(tmp_path, monkeypatch):
     db = Database(tmp_path / "b.db")
     monkeypatch.setattr(msgraph, "mail_available", lambda: False)
     captured = {}
-    monkeypatch.setattr(assistant, "brief", lambda subject, names, ctx, **k: captured.update(ctx=ctx) or "BRIEF")
+    monkeypatch.setattr(assistant, "brief", lambda subject, names, ctx, **k: captured.update(ctx=ctx) or {"headline": "BRIEF", "points": ["p"], "actions": []})
     ev = {
         "subject": "Woodland sync", "organizer": "Gokul", "body": "Agenda: pricing review",
         "attendees": [{"name": "Jai", "email": "jai@x.com"}],
         "start": "2026-06-29T13:00:00+00:00",
     }
     res = server.build_brief(db, ev)  # no prior recordings at all
-    assert res["brief"] == "BRIEF" and res["based_on"] == 0 and res["emails_used"] == 0
+    assert res["brief"]["headline"] == "BRIEF" and res["based_on"] == 0 and res["emails_used"] == 0
     assert "MEETING INVITE" in captured["ctx"]
     assert "Agenda: pricing review" in captured["ctx"] and "Jai" in captured["ctx"]
     db.close()
@@ -208,7 +208,7 @@ def test_build_brief_with_emails(tmp_path, monkeypatch):
         {"subject": "Re: pricing", "from": addr, "received": "2026-06-25T10:00:00Z", "preview": "the latest numbers"},
     ])
     captured = {}
-    monkeypatch.setattr(assistant, "brief", lambda s, n, ctx, **k: captured.update(ctx=ctx) or "OK")
+    monkeypatch.setattr(assistant, "brief", lambda s, n, ctx, **k: captured.update(ctx=ctx) or {"headline": "OK", "points": [], "actions": []})
     ev = {"subject": "Catch up", "attendees": [{"name": "Jai", "email": "jai@x.com"}]}
     res = server.build_brief(db, ev)
     assert res["emails_used"] == 1 and res["mail_available"] is True

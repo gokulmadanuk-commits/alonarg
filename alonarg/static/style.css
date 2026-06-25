@@ -638,6 +638,10 @@ body {
 .cal-pop-time, .cal-pop-att { font-size: 13px; }
 .cal-pop-att { margin-top: 2px; }
 .cal-pop-arm { display: flex; align-items: center; gap: 9px; margin-top: 13px; font-size: 13px; color: var(--text); cursor: pointer; }
+.cal-pop-bhead { font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.cal-pop-blabel { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 8px 0 4px; }
+.cal-pop-blist { margin: 0; padding-left: 18px; }
+.cal-pop-blist li { margin: 4px 0; line-height: 1.45; }
 
 /* toggle switch */
 .switch { position: relative; display: inline-block; width: 34px; height: 18px; flex: 0 0 auto; }
@@ -786,14 +790,48 @@ body {
 
 /* ===== Pre-meeting briefs ===== */
 .briefs-mailnote { font-size: 13px; margin: 0 0 14px; }
-.brief-card { padding: 16px 20px; }
-.brief-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.brief-title { margin: 0; font-size: 16px; color: var(--text); }
-.brief-when { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.brief-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.brief-list-item {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 18px; box-shadow: var(--shadow-card); cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.brief-list-item:hover { border-color: #d8d2c4; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08); }
+.bli-main { min-width: 0; flex: 1; }
+.bli-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.bli-meta { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.bli-headline { font-size: 13.5px; color: var(--text-muted); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bli-status { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 3px 10px; border-radius: 999px; background: var(--bg-subtle); }
+.bli-status.ready { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.bli-chev { flex: 0 0 auto; color: #c2bcae; font-size: 22px; line-height: 1; }
+
+.brief-back { margin-bottom: 14px; }
+.brief-detail { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
+.brief-detail-main { min-width: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; box-shadow: var(--shadow-card); }
+.brief-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.brief-d-title { margin: 0; font-size: 22px; color: var(--text); }
+.brief-d-when { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
 .brief-gen { flex: 0 0 auto; }
-.brief-text { margin-top: 12px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
-.brief-sub { margin-top: 10px; font-size: 12px; }
-.brief-empty { margin: 12px 0 0; }
+.brief-headline { font-size: 17px; line-height: 1.5; color: var(--text); margin: 18px 0 4px; font-weight: 500; }
+.brief-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 20px 0 8px; }
+.brief-points, .brief-actions-list { margin: 0; padding-left: 22px; }
+.brief-points li, .brief-actions-list li { margin: 7px 0; line-height: 1.5; color: var(--text); }
+.brief-actions-list { list-style: none; padding-left: 0; }
+.brief-actions-list li { position: relative; padding-left: 26px; }
+.brief-actions-list li::before { content: "☐"; position: absolute; left: 2px; top: -1px; color: var(--accent); font-size: 15px; }
+.brief-sub { margin-top: 18px; font-size: 12px; }
+.brief-empty { margin: 18px 0 0; }
+.brief-detail-side { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow-card); position: sticky; top: 84px; }
+.brief-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.brief-people li { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.bp-name { font-weight: 600; color: var(--text); }
+.bp-email { color: var(--accent); text-decoration: none; font-size: 13px; word-break: break-all; }
+.bp-email:hover { text-decoration: underline; }
+@media (max-width: 880px) {
+  .brief-detail { grid-template-columns: 1fr; }
+  .brief-detail-side { position: static; }
+}
 
 /* ===== Keyword trackers (settings) ===== */
 .tracker-add { display: flex; gap: 8px; margin: 6px 0 12px; }

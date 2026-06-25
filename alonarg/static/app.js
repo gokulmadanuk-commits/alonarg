@@ -230,12 +230,20 @@
     if (name === "settings") { refreshCalStatus(); loadSystemInfo(); loadTrackers(); }
   }
 
-  // ---- pre-meeting briefs hub -----------------------------------------
+  // ---- pre-meeting briefs hub (list -> detail) ------------------------
+  let _briefsByKey = {};
   function fmtBriefWhen(iso) {
     if (!iso) return "";
     const d = new Date(iso);
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+  function _briefHas(b) { return !!(b && (b.headline || (b.points && b.points.length) || (b.actions && b.actions.length))); }
+  function _briefSources(it) {
+    const s = [];
+    if (it.based_on) s.push(it.based_on + " past meeting" + (it.based_on !== 1 ? "s" : ""));
+    if (it.emails_used) s.push(it.emails_used + " email" + (it.emails_used !== 1 ? "s" : ""));
+    return s;
   }
   async function loadBriefs() {
     const body = document.getElementById("briefs-body");
@@ -247,65 +255,93 @@
       body.innerHTML = '<div class="empty-state"><p>Calendar not connected.</p><p class="muted">Connect it in <a href="/#settings">Settings</a>.</p></div>';
       return;
     }
-    renderBriefs(data.briefs || [], data.mail);
+    _briefsByKey = {};
+    (data.briefs || []).forEach((b) => { _briefsByKey[b.key] = b; });
+    renderBriefsList(data.briefs || [], data.mail);
   }
-  function renderBriefs(items, mailOn) {
+  function renderBriefsList(items, mailOn) {
     const body = document.getElementById("briefs-body");
     if (!items.length) {
       body.innerHTML = '<div class="empty-state"><p>No meetings flagged for recording.</p>' +
         '<p class="muted">Turn on <strong>Auto-record</strong> for a meeting in <a href="/#calendar">Calendar</a> and its brief will appear here.</p></div>';
       return;
     }
-    body.innerHTML = "";
+    let html = "";
     if (!mailOn) {
-      const note = document.createElement("p");
-      note.className = "muted briefs-mailnote";
-      note.innerHTML = 'Tip: briefs use the invite + past meetings now. Connect email in <a href="/#settings">Settings</a> to include recent threads with attendees.';
-      body.appendChild(note);
+      html += '<p class="muted briefs-mailnote">Tip: briefs use the invite + past meetings now. Connect email in <a href="/#settings">Settings</a> to include recent threads with attendees.</p>';
     }
+    html += '<ul class="brief-list">';
     items.forEach((it) => {
-      const sec = document.createElement("section");
-      sec.className = "panel brief-card";
-      sec.dataset.key = it.key;
-      const sources = [];
-      if (it.based_on) sources.push(it.based_on + " past meeting" + (it.based_on !== 1 ? "s" : ""));
-      if (it.emails_used) sources.push(it.emails_used + " email" + (it.emails_used !== 1 ? "s" : ""));
-      const sub = (it.generated_at ? "Prepared " + fmtBriefWhen(it.generated_at) : "Not prepared yet") +
-        (sources.length ? " · from " + sources.join(" + ") : "");
-      sec.innerHTML =
-        '<div class="brief-head">' +
-          '<div><h3 class="brief-title">' + esc(it.subject || "(no title)") + "</h3>" +
-          '<div class="brief-when">' + esc(fmtBriefWhen(it.start)) + "</div></div>" +
-          '<button class="btn brief-gen" type="button">' + (it.has_brief ? "Refresh" : "Prepare brief") + "</button>" +
-        "</div>" +
-        (it.has_brief
-          ? '<div class="brief-text">' + esc(it.brief) + "</div><div class=\"brief-sub muted\">" + esc(sub) + "</div>"
-          : '<p class="muted brief-empty">No brief yet — tap “Prepare brief”.</p>');
-      body.appendChild(sec);
+      const n = (it.attendees || []).length;
+      const meta = esc(fmtBriefWhen(it.start)) + (n ? " · " + n + " attendee" + (n !== 1 ? "s" : "") : "");
+      const status = it.has_brief ? "Ready" : "Tap to prepare";
+      html +=
+        '<li class="brief-list-item" data-key="' + esc(it.key) + '">' +
+          '<div class="bli-main">' +
+            '<div class="bli-title">' + esc(it.subject || "(no title)") + "</div>" +
+            '<div class="bli-meta">' + meta + "</div>" +
+            (it.has_brief && it.brief.headline ? '<div class="bli-headline">' + esc(it.brief.headline) + "</div>" : "") +
+          "</div>" +
+          '<span class="bli-status' + (it.has_brief ? " ready" : "") + '">' + status + "</span>" +
+          '<span class="bli-chev" aria-hidden="true">›</span>' +
+        "</li>";
     });
+    html += "</ul>";
+    body.innerHTML = html;
+  }
+  function openBriefDetail(key) {
+    const it = _briefsByKey[key];
+    if (!it) return;
+    document.getElementById("briefs-body").innerHTML = renderBriefDetail(it);
+  }
+  function renderBriefDetail(it) {
+    const b = it.brief || {};
+    const atts = it.attendees || [];
+    const sources = _briefSources(it);
+    const sub = it.has_brief
+      ? "Prepared " + esc(fmtBriefWhen(it.generated_at)) + (sources.length ? " · from " + esc(sources.join(" + ")) : "")
+      : "";
+    const pts = (b.points || []).map((p) => "<li>" + esc(p) + "</li>").join("");
+    const acts = (b.actions || []).map((p) => "<li>" + esc(p) + "</li>").join("");
+    const people = atts.length
+      ? atts.map((a) => '<li><span class="bp-name">' + esc(a.name || a.email || "?") + "</span>" +
+          (a.email ? '<a class="bp-email" href="mailto:' + esc(a.email) + '">' + esc(a.email) + "</a>" : "") + "</li>").join("")
+      : '<li class="muted">No attendee details.</li>';
+    return (
+      '<button class="btn btn-ghost brief-back" type="button">&larr; All briefs</button>' +
+      '<div class="brief-detail">' +
+        '<div class="brief-detail-main">' +
+          '<div class="brief-detail-head">' +
+            '<div><h2 class="brief-d-title">' + esc(it.subject || "(no title)") + "</h2>" +
+            '<div class="brief-d-when">' + esc(fmtBriefWhen(it.start)) + "</div></div>" +
+            '<button class="btn brief-gen" type="button" data-key="' + esc(it.key) + '">' + (it.has_brief ? "Refresh" : "Prepare brief") + "</button>" +
+          "</div>" +
+          (it.has_brief
+            ? (b.headline ? '<p class="brief-headline">' + esc(b.headline) + "</p>" : "") +
+              (pts ? '<h3 class="brief-h">Key points</h3><ul class="brief-points">' + pts + "</ul>" : "") +
+              (acts ? '<h3 class="brief-h">To raise / open items</h3><ul class="brief-actions-list">' + acts + "</ul>" : "") +
+              (sub ? '<div class="brief-sub muted">' + sub + "</div>" : "")
+            : '<p class="muted brief-empty">No brief yet — tap “Prepare brief”.</p>') +
+        "</div>" +
+        '<aside class="brief-detail-side"><h3 class="brief-h">Participants</h3><ul class="brief-people">' + people + "</ul></aside>" +
+      "</div>"
+    );
   }
   async function generateBrief(key, btn) {
-    const card = btn.closest(".brief-card");
     btn.disabled = true; const orig = btn.textContent; btn.textContent = "Preparing…";
     const { ok, body } = await jsonFetch("/api/briefs/generate", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: key }),
     });
     btn.disabled = false; btn.textContent = orig;
-    if (ok && body && body.brief) {
-      const sources = [];
-      if (body.based_on) sources.push(body.based_on + " past meeting" + (body.based_on !== 1 ? "s" : ""));
-      if (body.emails_used) sources.push(body.emails_used + " email" + (body.emails_used !== 1 ? "s" : ""));
-      const sub = "Prepared just now" + (sources.length ? " · from " + sources.join(" + ") : "");
-      const empty = card.querySelector(".brief-empty");
-      if (empty) empty.remove();
-      let textEl = card.querySelector(".brief-text");
-      if (!textEl) { textEl = document.createElement("div"); textEl.className = "brief-text"; card.appendChild(textEl); }
-      textEl.textContent = body.brief;
-      let subEl = card.querySelector(".brief-sub");
-      if (!subEl) { subEl = document.createElement("div"); subEl.className = "brief-sub muted"; card.appendChild(subEl); }
-      subEl.textContent = sub;
-      btn.textContent = "Refresh";
-    } else if (ok && body && !body.brief) {
+    if (ok && body && _briefHas(body.brief)) {
+      const it = _briefsByKey[key] || { key: key };
+      it.brief = body.brief; it.based_on = body.based_on; it.emails_used = body.emails_used;
+      it.generated_at = body.generated_at; it.has_brief = true;
+      if (body.attendees) it.attendees = body.attendees;
+      it.subject = body.subject || it.subject; it.start = body.start || it.start;
+      _briefsByKey[key] = it;
+      document.getElementById("briefs-body").innerHTML = renderBriefDetail(it);
+    } else if (ok && body && !_briefHas(body.brief)) {
       toast("Not enough info to brief this meeting yet");
     } else {
       toast((body && body.detail) || "Could not prepare the brief (is Ollama running?)");
@@ -494,7 +530,6 @@
 
     // Parse events into day buckets with minute offsets.
     const byDay = Array.from({ length: 7 }, () => []);
-    let minHour = 8, maxHour = 18;
     events.forEach((ev) => {
       _calEvents[ev.key] = ev;
       const s = new Date(ev.start);
@@ -507,16 +542,13 @@
       let eMin = e.getHours() * 60 + e.getMinutes();
       if (!sameDay(s, e) || eMin <= sMin) eMin = 24 * 60; // clamp multi-day to end of day
       byDay[di].push({ ev: ev, sMin: sMin, eMin: eMin });
-      minHour = Math.min(minHour, Math.floor(sMin / 60));
-      maxHour = Math.max(maxHour, Math.ceil(eMin / 60));
     });
-    const startHour = Math.max(0, minHour);
-    const endHour = Math.min(24, Math.max(maxHour, startHour + 1));
-    const totalHours = endHour - startHour;
-    // Stretch the grid to fill the viewport height; never go below MIN_HOUR_PX
-    // (so a 30-min meeting still shows its title). Scrolls if the day is long.
-    const avail = Math.max(360, Math.floor(window.innerHeight - body.getBoundingClientRect().top - 24));
-    const hourPx = Math.max(MIN_HOUR_PX, avail / totalHours);
+    // Render the full 24h (so late-night meetings are reachable by scrolling),
+    // but size hours so the 8am–6pm band fills the viewport, and open scrolled there.
+    const startHour = 0, endHour = 24, totalHours = 24;
+    const FOCUS_START = 8, FOCUS_HOURS = 10;
+    const avail = Math.max(360, Math.floor(window.innerHeight - body.getBoundingClientRect().top - 16));
+    const hourPx = Math.max(MIN_HOUR_PX, avail / FOCUS_HOURS);
     const totalPx = hourPx * totalHours;
 
     const grid = elc("div", "cal-grid");
@@ -553,6 +585,7 @@
     week.appendChild(grid);
     body.innerHTML = "";
     body.appendChild(week);
+    week.scrollTop = FOCUS_START * hourPx; // open on the 8am–6pm band
   }
 
   function eventBlock(it, startHour, hourPx) {
@@ -628,8 +661,20 @@
       body: JSON.stringify({ event: ev }),
     });
     btn.disabled = false;
-    if (ok && body) {
-      out.textContent = body.brief || "Not enough information to brief this meeting yet.";
+    if (ok && body && _briefHas(body.brief)) {
+      const b = body.brief;
+      let html = "";
+      if (b.headline) html += '<div class="cal-pop-bhead">' + esc(b.headline) + "</div>";
+      if (b.points && b.points.length) {
+        html += '<ul class="cal-pop-blist">' + b.points.map((p) => "<li>" + esc(p) + "</li>").join("") + "</ul>";
+      }
+      if (b.actions && b.actions.length) {
+        html += '<div class="cal-pop-blabel">To raise</div><ul class="cal-pop-blist">' +
+          b.actions.map((p) => "<li>" + esc(p) + "</li>").join("") + "</ul>";
+      }
+      out.innerHTML = html;
+    } else if (ok && body) {
+      out.textContent = "Not enough information to brief this meeting yet.";
     } else {
       out.textContent = (body && body.detail) || "Could not generate (is Ollama running?).";
     }
@@ -1272,13 +1317,14 @@
   const tasksOpenOnly = document.getElementById("tasks-open-only");
   if (tasksOpenOnly) tasksOpenOnly.addEventListener("change", loadTasks);
 
-  // briefs: prepare/refresh (delegated)
+  // briefs: open detail / back / prepare (delegated)
   const briefsBody = document.getElementById("briefs-body");
   if (briefsBody) briefsBody.addEventListener("click", (e) => {
-    const b = e.target.closest(".brief-gen");
-    if (!b) return;
-    const card = b.closest(".brief-card");
-    if (card) generateBrief(card.dataset.key, b);
+    const gen = e.target.closest(".brief-gen");
+    if (gen) { generateBrief(gen.dataset.key, gen); return; }
+    if (e.target.closest(".brief-back")) { loadBriefs(); return; }
+    const item = e.target.closest(".brief-list-item");
+    if (item) openBriefDetail(item.dataset.key);
   });
 
   // settings: keyword trackers

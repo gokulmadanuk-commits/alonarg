@@ -979,31 +979,62 @@ async function loadBriefsView() {
   renderBriefsView(data.briefs || []);
 }
 
+let _pwaBriefsByKey = {};
+
+function briefHasContent(b) {
+  return !!(b && (b.headline || (b.points && b.points.length) || (b.actions && b.actions.length)));
+}
+
+function briefBodyHtml(it) {
+  const b = it.brief || {};
+  const atts = it.attendees || [];
+  let h = '';
+  if (b.headline) h += '<div class="brief-headline">' + escapeHtml(b.headline) + '</div>';
+  if (b.points && b.points.length) {
+    h += '<div class="brief-h">Key points</div><ul class="brief-points">' +
+      b.points.map((p) => '<li>' + escapeHtml(p) + '</li>').join('') + '</ul>';
+  }
+  if (b.actions && b.actions.length) {
+    h += '<div class="brief-h">To raise / open items</div><ul class="brief-actions-list">' +
+      b.actions.map((p) => '<li>' + escapeHtml(p) + '</li>').join('') + '</ul>';
+  }
+  if (atts.length) {
+    h += '<div class="brief-h">Participants</div><ul class="brief-people">' +
+      atts.map((a) => '<li><span class="bp-name">' + escapeHtml(a.name || a.email || '?') + '</span>' +
+        (a.email ? '<a class="bp-email" href="mailto:' + escapeHtml(a.email) + '">' + escapeHtml(a.email) + '</a>' : '') +
+        '</li>').join('') + '</ul>';
+  }
+  const sources = [];
+  if (it.based_on) sources.push(it.based_on + ' past meeting' + (it.based_on !== 1 ? 's' : ''));
+  if (it.emails_used) sources.push(it.emails_used + ' email' + (it.emails_used !== 1 ? 's' : ''));
+  const sub = (it.generated_at ? 'Prepared ' + fmtBriefWhen(it.generated_at) : '') +
+    (sources.length ? ' · from ' + sources.join(' + ') : '');
+  if (sub) h += '<div class="brief-sub muted">' + escapeHtml(sub) + '</div>';
+  return h;
+}
+
+function briefCardHtml(it) {
+  return (
+    '<div class="brief-card" data-key="' + escapeHtml(it.key) + '">' +
+    '<div class="brief-head">' +
+    '<div style="min-width:0"><h3 class="brief-title">' + escapeHtml(it.subject || '(no title)') + '</h3>' +
+    '<div class="brief-when">' + escapeHtml(fmtBriefWhen(it.start)) + '</div></div>' +
+    '<button class="btn brief-gen" type="button">' + (it.has_brief ? 'Refresh' : 'Prepare') + '</button>' +
+    '</div>' +
+    (it.has_brief ? briefBodyHtml(it) : '<p class="muted brief-empty">No brief yet — tap “Prepare”.</p>') +
+    '</div>'
+  );
+}
+
 function renderBriefsView(items) {
   const list = $('#briefs-list');
+  _pwaBriefsByKey = {};
+  items.forEach((it) => { _pwaBriefsByKey[it.key] = it; });
   if (!items.length) {
     list.innerHTML = '<div class="empty-state">No meetings flagged for recording. Turn on Auto-record for a meeting in the Calendar tab and its brief will appear here.</div>';
     return;
   }
-  list.innerHTML = items.map((it) => {
-    const sources = [];
-    if (it.based_on) sources.push(it.based_on + ' past meeting' + (it.based_on !== 1 ? 's' : ''));
-    if (it.emails_used) sources.push(it.emails_used + ' email' + (it.emails_used !== 1 ? 's' : ''));
-    const sub = (it.generated_at ? 'Prepared ' + fmtBriefWhen(it.generated_at) : 'Not prepared yet') +
-      (sources.length ? ' · from ' + sources.join(' + ') : '');
-    return (
-      '<div class="brief-card" data-key="' + escapeHtml(it.key) + '">' +
-      '<div class="brief-head">' +
-      '<div style="min-width:0"><h3 class="brief-title">' + escapeHtml(it.subject || '(no title)') + '</h3>' +
-      '<div class="brief-when">' + escapeHtml(fmtBriefWhen(it.start)) + '</div></div>' +
-      '<button class="btn brief-gen" type="button">' + (it.has_brief ? 'Refresh' : 'Prepare') + '</button>' +
-      '</div>' +
-      (it.has_brief
-        ? '<div class="brief-text">' + escapeHtml(it.brief) + '</div><div class="brief-sub muted">' + escapeHtml(sub) + '</div>'
-        : '<p class="muted brief-empty">No brief yet — tap “Prepare”.</p>') +
-      '</div>'
-    );
-  }).join('');
+  list.innerHTML = items.map(briefCardHtml).join('');
 }
 
 async function generateBriefView(key, btn) {
@@ -1018,31 +1049,28 @@ async function generateBriefView(key, btn) {
       body: JSON.stringify({ key: key }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (resp.ok && data.brief) {
-      const sources = [];
-      if (data.based_on) sources.push(data.based_on + ' past meeting' + (data.based_on !== 1 ? 's' : ''));
-      if (data.emails_used) sources.push(data.emails_used + ' email' + (data.emails_used !== 1 ? 's' : ''));
-      const empty = card.querySelector('.brief-empty');
-      if (empty) empty.remove();
-      let textEl = card.querySelector('.brief-text');
-      if (!textEl) { textEl = document.createElement('div'); textEl.className = 'brief-text'; card.appendChild(textEl); }
-      textEl.textContent = data.brief;
-      let subEl = card.querySelector('.brief-sub');
-      if (!subEl) { subEl = document.createElement('div'); subEl.className = 'brief-sub muted'; card.appendChild(subEl); }
-      subEl.textContent = 'Prepared just now' + (sources.length ? ' · from ' + sources.join(' + ') : '');
-      btn.textContent = 'Refresh';
+    if (resp.ok && briefHasContent(data.brief)) {
+      const it = _pwaBriefsByKey[key] || { key: key };
+      it.brief = data.brief; it.based_on = data.based_on; it.emails_used = data.emails_used;
+      it.generated_at = data.generated_at; it.has_brief = true;
+      if (data.attendees) it.attendees = data.attendees;
+      it.subject = data.subject || it.subject; it.start = data.start || it.start;
+      _pwaBriefsByKey[key] = it;
+      if (card) card.outerHTML = briefCardHtml(it);
     } else if (resp.ok) {
       toast('Not enough info to brief this meeting yet.');
       btn.textContent = orig;
+      btn.disabled = false;
     } else {
       toast('Could not prepare the brief.');
       btn.textContent = orig;
+      btn.disabled = false;
     }
   } catch (_) {
     toast('Could not reach your laptop.');
     btn.textContent = orig;
+    btn.disabled = false;
   }
-  btn.disabled = false;
 }
 
 /* =====================================================================

@@ -78,21 +78,43 @@ def ask(question: str, context_text: str, **kw) -> str:
     return _chat(system, user, **kw).strip()
 
 
-def brief(subject: str, attendees: list[str], context_text: str, **kw) -> str:
-    """Write a short pre-meeting brief grounded in the user's past meetings."""
+def brief(subject: str, attendees: list[str], context_text: str, **kw) -> dict:
+    """A structured, scannable pre-meeting brief grounded in the provided context.
+
+    Returns ``{"headline": str, "points": [str], "actions": [str]}``: a one-line
+    headline, key context bullets, and open/action items to raise.
+    """
     system = (
-        "You write a concise pre-meeting brief from the user's PAST meetings and "
-        "RECENT EMAILS. In 3-5 sentences remind them what was discussed last time "
-        "with these people or on this topic, anything still outstanding from recent "
-        "emails, and then explicitly list any OPEN action items they owe. Use ONLY "
-        "the provided history; if little is known, say so briefly. No preamble, no headings."
+        "You write a concise, scannable PRE-MEETING BRIEF from the user's past "
+        "meetings, recent emails, and the calendar invite. Respond with ONLY a JSON "
+        "object with exactly these keys:\n"
+        '  "headline": one short sentence on what this meeting is and where things stand.\n'
+        '  "points": an array of 3-6 short bullet strings — key context, recent updates, '
+        "and decisions worth knowing going in.\n"
+        '  "actions": an array of short bullet strings — open items, follow-ups you owe, '
+        "or things to raise (empty array if none).\n"
+        "Base everything ONLY on the provided information; if little is known, say so in "
+        "the headline and keep the arrays short. Keep bullets crisp. No markdown, no preamble."
     )
     user = (
         f"Upcoming meeting: {subject or '(untitled)'}\n"
         f"Attendees: {', '.join(a for a in attendees if a) or '(unknown)'}\n\n"
-        f"Past meeting history:\n{context_text}"
+        f"Context:\n{context_text}"
     )
-    return _chat(system, user, **kw).strip()
+    content = _chat(system, user, fmt="json", **kw)
+    try:
+        data = extract_json(content)
+    except ValueError:
+        data = {}
+
+    def _arr(x):
+        return [str(i).strip() for i in (x or []) if str(i).strip()]
+
+    return {
+        "headline": str(data.get("headline", "")).strip(),
+        "points": _arr(data.get("points")),
+        "actions": _arr(data.get("actions")),
+    }
 
 
 def draft_email(action_item: str, context_text: str = "", **kw) -> dict:

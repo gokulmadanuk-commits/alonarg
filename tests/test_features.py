@@ -447,14 +447,15 @@ def test_brief_with_history(tmp_db_path, tmp_path, monkeypatch):
 
     def fake_brief(subject, attendees, context, **k):
         captured["ctx"] = context
-        return "Last time you set pricing at $99."
+        return {"headline": "Pricing recap", "points": ["set pricing at $99"], "actions": []}
 
     monkeypatch.setattr(assistant, "brief", fake_brief)
     r = client.post("/api/calendar/brief", json={"subject": "Pricing discussion", "attendees": ["Jai"]})
     assert r.status_code == 200
     body = r.json()
     assert body["based_on"] >= 1 and "99" in captured["ctx"]
-    assert body["brief"] == "Last time you set pricing at $99."
+    assert body["brief"]["headline"] == "Pricing recap"
+    assert body["brief"]["points"] == ["set pricing at $99"]
     db.close()
 
 
@@ -483,13 +484,15 @@ def test_briefs_list_and_generate(tmp_db_path, tmp_path, monkeypatch):
     assert data["connected"] is True
     assert len(data["briefs"]) == 1 and data["briefs"][0]["has_brief"] is False
 
-    monkeypatch.setattr(assistant, "brief", lambda *a, **k: "Generated brief")
+    monkeypatch.setattr(assistant, "brief", lambda *a, **k: {"headline": "Generated brief", "points": ["p1"], "actions": []})
     g = client.post("/api/briefs/generate", json={"key": "e1"}).json()
-    assert g["brief"] == "Generated brief" and g["key"] == "e1"
+    assert g["brief"]["headline"] == "Generated brief" and g["key"] == "e1"
+    assert g["attendees"][0]["name"] == "Jai"
 
     data2 = client.get("/api/briefs").json()
     assert data2["briefs"][0]["has_brief"] is True
-    assert data2["briefs"][0]["brief"] == "Generated brief"
+    assert data2["briefs"][0]["brief"]["headline"] == "Generated brief"
+    assert data2["briefs"][0]["attendees"][0]["name"] == "Jai"
     db.close()
 
 
@@ -498,6 +501,24 @@ def test_briefs_generate_unknown_key_404(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     monkeypatch.setattr(calendars, "upcoming_events", lambda days=14: [])
     assert client.post("/api/briefs/generate", json={"key": "nope"}).status_code == 404
+    db.close()
+
+
+def test_briefs_tolerates_legacy_string_cache(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import autorecord, briefs, calendars, config, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: True)
+    monkeypatch.setattr(msgraph, "mail_available", lambda: False)
+    ev = {"id": "eX", "subject": "Legacy", "start": "2026-12-02T10:00:00+00:00",
+          "end": "2026-12-02T10:30:00+00:00", "attendees": []}
+    monkeypatch.setattr(calendars, "upcoming_events", lambda days=14: [dict(ev)])
+    autorecord.approve(ev)
+    briefs.set("eX", {"brief": "old string brief", "generated_at": "t"})  # legacy (pre-structured) cache
+    r = client.get("/api/briefs")
+    assert r.status_code == 200
+    item = r.json()["briefs"][0]
+    assert item["has_brief"] is False and isinstance(item["brief"], dict)
     db.close()
 
 
@@ -510,7 +531,7 @@ def test_brief_includes_emails(tmp_db_path, tmp_path, monkeypatch):
         {"subject": "Quote", "from": addr, "received": "2026-06-25T10:00:00Z", "preview": "the quote is ready"},
     ])
     captured = {}
-    monkeypatch.setattr(assistant, "brief", lambda subject, attendees, ctx, **k: captured.update(ctx=ctx) or "ok")
+    monkeypatch.setattr(assistant, "brief", lambda subject, attendees, ctx, **k: captured.update(ctx=ctx) or {"headline": "h", "points": [], "actions": []})
     r = client.post("/api/calendar/brief", json={
         "subject": "Pricing discussion", "attendees": ["Jai"], "emails": ["jai@x.com"],
     })
@@ -527,7 +548,7 @@ def test_brief_skips_email_when_not_granted(tmp_db_path, tmp_path, monkeypatch):
     called = {"read": False}
     monkeypatch.setattr(msgraph, "mail_available", lambda: False)
     monkeypatch.setattr(msgraph, "read_messages", lambda *a, **k: called.update(read=True) or [])
-    monkeypatch.setattr(assistant, "brief", lambda *a, **k: "ok")
+    monkeypatch.setattr(assistant, "brief", lambda *a, **k: {"headline": "ok", "points": [], "actions": []})
     r = client.post("/api/calendar/brief", json={
         "subject": "Pricing discussion", "attendees": ["Jai"], "emails": ["jai@x.com"],
     })
