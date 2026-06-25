@@ -379,3 +379,64 @@ def test_system_info(tmp_db_path, tmp_path, monkeypatch):
     assert "data_dir" in body and "model" in body
     assert body["calendar_connected"] is False
     db.close()
+
+
+def test_resummarize_with_template(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import summarize
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    captured = {}
+
+    def fake_sum(text, template="general", **k):
+        captured["template"] = template
+        return SummaryResult(title="model title", summary="Standup notes", action_items=["x"])
+
+    monkeypatch.setattr(summarize, "summarize", fake_sum)
+    r = client.post(f"/api/recordings/{a}/resummarize", json={"template": "standup"})
+    assert r.status_code == 200
+    assert captured["template"] == "standup"
+    body = r.json()
+    assert body["template"] == "standup" and body["summary"]["summary"] == "Standup notes"
+    got = db.get_recording(a)
+    assert got["summary"]["summary"] == "Standup notes"
+    assert got["summary"]["title"] == "Pricing discussion"  # user title preserved
+    assert got["state"]["template"] == "standup"
+    db.close()
+
+
+def test_resummarize_no_transcript_400(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    rid = db.create_recording(status="done", title="No transcript")
+    assert client.post(f"/api/recordings/{rid}/resummarize", json={"template": "general"}).status_code == 400
+    db.close()
+
+
+def test_update_state_tags_pin(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, _ = _seed(db)
+    r = client.put(f"/api/recordings/{a}/state", json={"tags": ["Sales", "  "], "pinned": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["tags"] == ["Sales"] and body["pinned"] is True
+    # partial update preserves the other key
+    r2 = client.put(f"/api/recordings/{a}/state", json={"pinned": False})
+    assert r2.json()["pinned"] is False and r2.json()["tags"] == ["Sales"]
+    db.close()
+
+
+def test_action_items_hub_and_toggle(tmp_db_path, tmp_path, monkeypatch):
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    a, b = _seed(db)  # a has one action item, b has none
+    item = "Email the client the quote"
+    items = client.get("/api/action-items").json()
+    assert any(i["recording_id"] == a and i["item"] == item and i["done"] is False for i in items)
+    assert all(i["recording_id"] != b for i in items)  # b has no action items
+
+    r = client.post("/api/action-items/toggle", json={"recording_id": a, "item": item, "done": True})
+    assert r.status_code == 200 and r.json()["done"] is True
+    by_key = {(i["recording_id"], i["item"]): i for i in client.get("/api/action-items").json()}
+    assert by_key[(a, item)]["done"] is True
+
+    open_items = client.get("/api/action-items", params={"open_only": True}).json()
+    assert all(not (i["recording_id"] == a and i["item"] == item) for i in open_items)
+    db.close()

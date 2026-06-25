@@ -33,6 +33,7 @@ _UPDATABLE_COLUMNS = frozenset(
         "transcript_json",
         "summary_json",
         "meta_json",
+        "state_json",
         "created_at",
     }
 )
@@ -50,6 +51,7 @@ _LIST_COLUMNS = (
     "system_path",
     "mixed_path",
     "summary_json",
+    "state_json",
 )
 
 _SCHEMA = """
@@ -65,7 +67,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     mixed_path      TEXT,
     transcript_json TEXT,
     summary_json    TEXT,
-    meta_json       TEXT
+    meta_json       TEXT,
+    state_json      TEXT
 );
 """
 
@@ -106,6 +109,8 @@ class Database:
             existing = {row[1] for row in self._conn.execute("PRAGMA table_info(recordings)")}
             if "meta_json" not in existing:
                 self._conn.execute("ALTER TABLE recordings ADD COLUMN meta_json TEXT")
+            if "state_json" not in existing:
+                self._conn.execute("ALTER TABLE recordings ADD COLUMN state_json TEXT")
             self._conn.commit()
 
     # --- writes -----------------------------------------------------------
@@ -181,6 +186,10 @@ class Database:
         """Store call metadata (people, contacts, ...) as JSON in ``meta_json``."""
         self.update_recording(rec_id, meta_json=json.dumps(meta))
 
+    def set_state(self, rec_id: int, state: dict) -> None:
+        """Store per-recording UI state (pinned, tags, done_actions) in ``state_json``."""
+        self.update_recording(rec_id, state_json=json.dumps(state))
+
     def delete_recording(self, rec_id: int) -> bool:
         """Delete a recording. Return True if a row was removed."""
         with self._lock:
@@ -203,6 +212,7 @@ class Database:
         record["transcript"] = _loads_or_none(record.get("transcript_json"))
         record["summary"] = _loads_or_none(record.get("summary_json"))
         record["meta"] = _loads_or_none(record.get("meta_json"))
+        record["state"] = _loads_or_none(record.get("state_json"))
         return record
 
     def list_recordings(self) -> list[dict]:
@@ -218,6 +228,7 @@ class Database:
         for row in rows:
             record = dict(row)
             record["summary"] = _loads_or_none(record.get("summary_json"))
+            record["state"] = _loads_or_none(record.get("state_json"))
             result.append(record)
         return result
 
@@ -246,6 +257,7 @@ class Database:
         for row in rows:
             record = dict(row)
             record["summary"] = _loads_or_none(record.get("summary_json"))
+            record["state"] = _loads_or_none(record.get("state_json"))
             result.append(record)
         return result
 

@@ -19,12 +19,48 @@ from alonarg import config
 from alonarg.types import SummaryResult
 
 
-def build_prompt(transcript_text: str) -> tuple[str, str]:
+# Note templates: each tailors HOW the meeting is summarized while keeping the
+# same JSON output shape. ``key -> (label, focus instruction)``.
+TEMPLATES: dict[str, tuple[str, str]] = {
+    "general": ("General", ""),
+    "standup": (
+        "Standup",
+        "This is a team standup. Organize the summary around what was done, what "
+        "is planned next, and any blockers. Make action items capture who does what.",
+    ),
+    "one_on_one": (
+        "1:1",
+        "This is a 1:1 meeting. Capture discussion topics, feedback given, "
+        "career/growth notes, and the follow-ups both sides agreed to.",
+    ),
+    "sales": (
+        "Sales call",
+        "This is a sales call. Capture the prospect's needs and pain points, any "
+        "objections, budget/authority/timeline signals, and concrete next steps "
+        "to advance the deal.",
+    ),
+    "interview": (
+        "Interview",
+        "This is a candidate interview. Summarize the candidate's background and "
+        "strengths, any concerns raised, and put a clear hiring recommendation "
+        "and follow-ups in next steps.",
+    ),
+}
+
+
+def template_choices() -> list[dict]:
+    """Return ``[{"key", "label"}]`` for the UI template picker."""
+    return [{"key": k, "label": v[0]} for k, v in TEMPLATES.items()]
+
+
+def build_prompt(transcript_text: str, template: str = "general") -> tuple[str, str]:
     """Build the (system_prompt, user_prompt) pair for the chat request.
 
     The system prompt instructs the model to summarize meeting transcripts and
-    to output ONLY a JSON object with exactly four keys. The user prompt carries
-    the transcript itself.
+    to output ONLY a JSON object with exactly four keys. ``template`` selects an
+    optional focus instruction (standup / 1:1 / sales / interview) that is
+    appended without changing the JSON shape. The user prompt carries the
+    transcript itself.
     """
     system_prompt = (
         "You are a meeting-notes assistant. You summarize meeting transcripts. "
@@ -38,6 +74,9 @@ def build_prompt(transcript_text: str) -> tuple[str, str]:
         '  "next_steps": an array of strings describing follow-up next steps '
         "(empty array if none)."
     )
+    focus = TEMPLATES.get(template, TEMPLATES["general"])[1]
+    if focus:
+        system_prompt += "\n\nContext for this meeting: " + focus
     user_prompt = f"Transcript:\n{transcript_text}"
     return system_prompt, user_prompt
 
@@ -168,11 +207,13 @@ def summarize(
     model: str | None = None,
     host: str | None = None,
     timeout: int = config.OLLAMA_TIMEOUT,
+    template: str = "general",
 ) -> SummaryResult:
     """Summarize ``transcript_text`` via a local Ollama model.
 
     POSTs a chat request to ``{host}/api/chat`` with ``format:"json"`` so Ollama
     returns valid JSON, then parses the response into a ``SummaryResult``.
+    ``template`` picks a focus style (general / standup / 1:1 / sales / interview).
 
     Raises ``RuntimeError`` if Ollama is unreachable (with a hint to start it /
     pull the model) or if it returns a non-200 status (including the response
@@ -181,7 +222,7 @@ def summarize(
     host = (host or config.OLLAMA_HOST).rstrip("/")
     model = model or config.OLLAMA_MODEL
 
-    system_prompt, user_prompt = build_prompt(transcript_text)
+    system_prompt, user_prompt = build_prompt(transcript_text, template)
     payload = {
         "model": model,
         "messages": [

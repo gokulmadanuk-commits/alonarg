@@ -45,7 +45,10 @@
 
           <div class="list-toolbar">
             <h3 class="section-title">Recordings</h3>
-            <input id="search-input" class="search-input" type="search" placeholder="Search meetings…" />
+            <div class="list-tools">
+              <select id="tag-filter" class="tag-filter" hidden><option value="">All tags</option></select>
+              <input id="search-input" class="search-input" type="search" placeholder="Search meetings…" />
+            </div>
           </div>
 
           <div id="empty-state" class="empty-state" {% if recordings %}hidden{% endif %}>
@@ -55,7 +58,7 @@
 
           <ul id="recordings" class="cards">
             {% for r in recordings %}
-            <li class="card" data-id="{{ r.id }}" data-href="/recording/{{ r.id }}">
+            <li class="card" data-id="{{ r.id }}" data-href="/recording/{{ r.id }}" data-tags="{{ (r.state.tags | join(',')) if (r.state and r.state.tags) else '' }}">
               <div class="card-main">
                 <a class="card-title" href="/recording/{{ r.id }}">{{ r.title or "Untitled recording" }}</a>
                 <div class="card-meta">
@@ -71,9 +74,11 @@
                   {% if r.summary and r.summary.action_items %}
                   <span class="action-count">{{ r.summary.action_items | length }} action item{{ "s" if (r.summary.action_items | length) != 1 else "" }}</span>
                   {% endif %}
+                  {% if r.state and r.state.tags %}{% for t in r.state.tags %}<span class="tag-chip sm">{{ t }}</span>{% endfor %}{% endif %}
                 </div>
               </div>
               <div class="card-actions">
+                <button class="pin-btn card-pin" type="button" data-id="{{ r.id }}" data-pinned="{{ '1' if (r.state and r.state.pinned) else '' }}" title="Pin meeting" aria-label="Pin meeting">★</button>
                 <button class="btn btn-danger delete-btn" type="button" data-id="{{ r.id }}">Delete</button>
               </div>
             </li>
@@ -87,6 +92,15 @@
           <div id="calendar-body">
             <p class="muted">Loading your calendar…</p>
           </div>
+        </section>
+
+        <!-- ===== Tasks ===== -->
+        <section class="view" data-view="tasks" hidden>
+          <div class="tasks-head">
+            <p class="view-sub muted">Every action item across your meetings — tick them off as you go.</p>
+            <label class="tasks-filter"><input type="checkbox" id="tasks-open-only" /> Show open only</label>
+          </div>
+          <div id="tasks-body"><p class="muted">Loading…</p></div>
         </section>
 
         <!-- ===== Settings ===== -->

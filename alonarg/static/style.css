@@ -648,6 +648,115 @@ body {
 .sys-info dt { color: var(--text-muted); }
 .sys-info dd { margin: 0; color: var(--text); word-break: break-all; }
 
+/* ===== Pin / favorite ===== */
+.pin-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: #c8ccd4;
+  padding: 2px 4px;
+  transition: color 0.12s ease, transform 0.1s ease;
+}
+.pin-btn:hover { color: #f0b429; }
+.pin-btn[data-pinned="1"] { color: #f0b429; }
+.title-row .pin-btn { font-size: 22px; }
+.card-pin { align-self: flex-start; }
+
+/* ===== Tags ===== */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--accent-hover);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.tag-chip.sm { padding: 2px 9px; }
+.tag-x { border: none; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; opacity: 0.7; }
+.tag-x:hover { opacity: 1; }
+.tags-box { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tag-input { margin-top: 4px; }
+.list-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tag-filter {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ===== Detail toolbar: template picker ===== */
+.toolbar-spacer { flex: 1 1 auto; }
+.tmpl-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.tmpl-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ===== Transcript <-> audio sync ===== */
+.transcript-hint { font-size: 12px; margin: 8px 0; }
+.transcript-segments { display: flex; flex-direction: column; gap: 2px; max-height: 460px; overflow: auto; }
+.tseg {
+  display: grid;
+  grid-template-columns: 52px 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tseg:hover { background: var(--bg-subtle); }
+.tseg.active { background: rgba(79, 70, 229, 0.1); }
+.tseg-ts {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  text-align: left;
+  padding: 0;
+}
+.tseg-ts:hover { text-decoration: underline; }
+.tseg-spk { font-size: 12px; font-weight: 600; }
+.tseg-spk.spk-you { color: var(--accent); }
+.tseg-spk.spk-others { color: #0d9488; }
+.tseg-text { color: var(--text); word-break: break-word; }
+
+/* ===== Talk-time ===== */
+.talktime { display: flex; flex-direction: column; gap: 8px; }
+.tt-row { display: grid; grid-template-columns: 56px 1fr 40px; gap: 8px; align-items: center; font-size: 13px; }
+.tt-name { color: var(--text-muted); }
+.tt-bar { background: var(--bg-subtle); border-radius: 999px; height: 8px; overflow: hidden; }
+.tt-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.tt-fill.spk-you { background: var(--accent); }
+.tt-fill.spk-others { background: #0d9488; }
+.tt-pct { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ===== Tasks hub ===== */
+.tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tasks-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.task-group { padding: 14px 18px; }
+.task-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.task-group-title { font-weight: 600; color: var(--text); text-decoration: none; }
+.task-group-title:hover { color: var(--accent); }
+.task-group-head .meta-date { font-size: 12px; color: var(--text-muted); }
+.task-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; cursor: pointer; }
+.task-row input { margin-top: 3px; }
+.task-text { color: var(--text); }
+.task-row.done .task-text { text-decoration: line-through; color: var(--text-muted); }
+
 @media (max-width: 760px) {
   .app { flex-direction: column; }
   .sidebar {
