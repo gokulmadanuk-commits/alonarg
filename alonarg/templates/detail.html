@@ -18,6 +18,9 @@
 
       <main class="content-main detail" data-rec-id="{{ rec.id }}">
     <div class="title-row">
+      <button class="pin-btn" id="pin-btn" type="button" data-id="{{ rec.id }}"
+              data-pinned="{{ '1' if (rec.state and rec.state.pinned) else '' }}"
+              title="Pin meeting" aria-label="Pin meeting">★</button>
       <h2 class="detail-title" id="detail-title" data-id="{{ rec.id }}">{{ rec.title or "Untitled recording" }}</h2>
       <button class="btn btn-ghost edit-title-btn" type="button" title="Rename meeting">Edit title</button>
     </div>
@@ -33,6 +36,15 @@
       <button id="edit-notes" class="btn" type="button">Edit notes</button>
       <button id="copy-notes" class="btn" type="button">Copy notes</button>
       <button id="download-notes" class="btn" type="button">Download .md</button>
+      <span class="toolbar-spacer"></span>
+      <label class="tmpl-pick"><span class="muted">Style</span>
+        <select id="tmpl-select" class="tmpl-select">
+          {% for t in templates %}
+          <option value="{{ t.key }}" {% if (rec.state and rec.state.template == t.key) or (not (rec.state and rec.state.template) and t.key == 'general') %}selected{% endif %}>{{ t.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button id="regen-btn" class="btn" type="button" title="Re-summarize the transcript in this style">Regenerate</button>
     </div>
 
     {% if rec.status != "done" %}
@@ -98,9 +110,20 @@
         </div>
 
         <section class="panel">
-          <details class="transcript">
+          <details class="transcript" open>
             <summary>Full transcript</summary>
-            {% if rec.transcript and rec.transcript.text %}
+            {% if rec.transcript and rec.transcript.segments %}
+              <p class="muted transcript-hint">Click a timestamp to jump the audio there.</p>
+              <div class="transcript-segments" id="transcript-segments">
+                {% for s in rec.transcript.segments %}
+                <div class="tseg" data-start="{{ s.start }}" data-end="{{ s.end }}">
+                  <button class="tseg-ts" type="button" data-seek="{{ s.start }}"></button>
+                  <span class="tseg-spk spk-{{ 'you' if s.speaker == 'You' else 'others' }}">{{ s.speaker }}</span>
+                  <span class="tseg-text">{{ s.text }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            {% elif rec.transcript and rec.transcript.text %}
               <pre class="transcript-text">{{ rec.transcript.text }}</pre>
             {% else %}
               <p class="muted">No transcript available.</p>
@@ -146,6 +169,27 @@
             </div>
           </div>
         </section>
+
+        {% if talk_time and talk_time.speakers %}
+        <section class="panel">
+          <h3>Talk-time</h3>
+          <div class="talktime">
+            {% for s in talk_time.speakers %}
+            <div class="tt-row">
+              <span class="tt-name">{{ s.speaker }}</span>
+              <span class="tt-bar"><span class="tt-fill spk-{{ 'you' if s.speaker == 'You' else 'others' }}" style="width: {{ s.pct }}%"></span></span>
+              <span class="tt-pct">{{ s.pct }}%</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="panel">
+          <h3>Tags</h3>
+          <div id="tags-box" class="tags-box" data-id="{{ rec.id }}"></div>
+          <input id="tag-input" class="row-input tag-input" type="text" placeholder="Add a tag, press Enter" maxlength="40" />
+        </section>
       </aside>
     </div>
       </main>
@@ -157,6 +201,7 @@
     window.ALONARG_REC_ID = {{ rec.id|tojson }};
     window.ALONARG_SUMMARY = {{ (rec.summary or {"summary": "", "action_items": [], "next_steps": []}) | tojson }};
     window.ALONARG_META = {{ (rec.meta or {"people": [], "contacts": []}) | tojson }};
+    window.ALONARG_STATE = {{ (rec.state or {"pinned": false, "tags": [], "done_actions": []}) | tojson }};
   </script>
   <script src="/static/app.js"></script>
 </body>

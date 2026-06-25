@@ -332,6 +332,8 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
         recordings = db.list_recordings()
+        # Pinned meetings float to the top (stable: keeps newest-first within each group).
+        recordings.sort(key=lambda r: 0 if (r.get("state") or {}).get("pinned") else 1)
         return templates.TemplateResponse(
             request,
             "dashboard.html",

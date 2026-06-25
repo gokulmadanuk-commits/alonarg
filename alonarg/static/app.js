@@ -207,7 +207,7 @@
   }
 
   // ---- left-nav view switching (recordings / calendar / settings) ------
-  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", settings: "Settings" };
+  const VIEW_TITLES = { recordings: "Recordings", calendar: "Calendar", tasks: "Tasks", settings: "Settings" };
   function currentView() {
     const h = (location.hash || "").replace("#", "");
     return VIEW_TITLES[h] ? h : "recordings";
@@ -221,7 +221,70 @@
     const main = document.querySelector(".content-main");
     if (main) main.classList.toggle("cal-wide", name === "calendar");
     if (name === "calendar") loadCalendar();
+    if (name === "tasks") loadTasks();
     if (name === "settings") { refreshCalStatus(); loadSystemInfo(); }
+  }
+
+  // ---- tasks hub (all action items across meetings) -------------------
+  async function loadTasks() {
+    const body = document.getElementById("tasks-body");
+    if (!body) return;
+    const openOnly = document.getElementById("tasks-open-only");
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    const q = openOnly && openOnly.checked ? "?open_only=true" : "";
+    const { ok, body: data } = await jsonFetch("/api/action-items" + q);
+    if (!ok || !Array.isArray(data)) { body.innerHTML = '<p class="ask-answer error">Could not load tasks.</p>'; return; }
+    renderTasks(data);
+  }
+  function renderTasks(items) {
+    const body = document.getElementById("tasks-body");
+    const openOnly = document.getElementById("tasks-open-only");
+    if (!items.length) {
+      body.innerHTML = '<div class="empty-state"><p>No action items' + (openOnly && openOnly.checked ? " still open" : " yet") + ".</p></div>";
+      return;
+    }
+    const order = [];
+    const groups = {};
+    items.forEach((it) => {
+      if (!groups[it.recording_id]) { groups[it.recording_id] = { title: it.title, created: it.created_at, items: [] }; order.push(it.recording_id); }
+      groups[it.recording_id].items.push(it);
+    });
+    body.innerHTML = "";
+    order.forEach((rid) => {
+      const g = groups[rid];
+      const sec = document.createElement("section");
+      sec.className = "panel task-group";
+      const head = document.createElement("div");
+      head.className = "task-group-head";
+      head.innerHTML =
+        '<a class="task-group-title" href="/recording/' + rid + '">' + esc(g.title) + "</a>" +
+        '<span class="meta-date" data-created="' + esc(g.created) + '">' + esc(g.created) + "</span>";
+      sec.appendChild(head);
+      g.items.forEach((it) => {
+        const row = document.createElement("label");
+        row.className = "task-row" + (it.done ? " done" : "");
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.checked = it.done;
+        const span = document.createElement("span");
+        span.className = "task-text"; span.textContent = it.item;
+        cb.addEventListener("change", () => toggleTask(it, cb, row));
+        row.append(cb, span);
+        sec.appendChild(row);
+      });
+      body.appendChild(sec);
+    });
+    formatStaticCells(body);
+  }
+  async function toggleTask(it, cb, row) {
+    const done = cb.checked;
+    cb.disabled = true;
+    const { ok } = await jsonFetch("/api/action-items/toggle", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recording_id: it.recording_id, item: it.item, done: done }),
+    });
+    cb.disabled = false;
+    if (ok) { it.done = done; row.classList.toggle("done", done); }
+    else { cb.checked = !done; toast("Could not update"); }
   }
 
   // ---- calendar week view + auto-record toggles -----------------------
@@ -532,10 +595,13 @@
   function renderCard(rec) {
     const summary = rec.summary || {};
     const count = (summary.action_items && summary.action_items.length) || 0;
+    const tags = (rec.state && rec.state.tags) || [];
+    const pinned = !!(rec.state && rec.state.pinned);
     const li = document.createElement("li");
     li.className = "card";
     li.dataset.id = rec.id;
     li.dataset.href = "/recording/" + rec.id;
+    li.dataset.tags = tags.join(",");
     li.innerHTML =
       '<div class="card-main">' +
         '<a class="card-title" href="/recording/' + rec.id + '">' + esc(rec.title || "Untitled recording") + "</a>" +
@@ -548,9 +614,11 @@
         '<div class="card-tags">' +
           '<span class="status-badge status-' + esc(rec.status) + '" data-status>' + esc(rec.status) + "</span>" +
           (count ? '<span class="action-count">' + count + " action item" + (count !== 1 ? "s" : "") + "</span>" : "") +
+          tags.map((t) => '<span class="tag-chip sm">' + esc(t) + "</span>").join("") +
         "</div>" +
       "</div>" +
       '<div class="card-actions">' +
+        '<button class="pin-btn card-pin" type="button" data-id="' + rec.id + '" data-pinned="' + (pinned ? "1" : "") + '" title="Pin meeting">★</button>' +
         '<button class="btn btn-danger delete-btn" type="button" data-id="' + rec.id + '">Delete</button>' +
       "</div>";
     return li;
@@ -561,6 +629,7 @@
     ul.innerHTML = "";
     recs.forEach((r) => ul.appendChild(renderCard(r)));
     formatStaticCells(ul);
+    refreshTagFilter();
     const empty = document.getElementById("empty-state");
     if (empty) {
       empty.hidden = recs.length > 0;
@@ -577,6 +646,32 @@
     if (!input) return;
     const { ok, body } = await jsonFetch("/api/search?q=" + encodeURIComponent(input.value.trim()));
     if (ok && Array.isArray(body)) renderList(body);
+  }
+
+  // ---- filter recordings by tag --------------------------------------
+  function refreshTagFilter() {
+    const sel = document.getElementById("tag-filter");
+    if (!sel) return;
+    const tags = new Set();
+    document.querySelectorAll("#recordings .card[data-tags]").forEach((c) => {
+      (c.getAttribute("data-tags") || "").split(",").forEach((t) => { t = t.trim(); if (t) tags.add(t); });
+    });
+    const cur = sel.value;
+    const sorted = Array.from(tags).sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">All tags</option>' +
+      sorted.map((t) => '<option value="' + esc(t) + '">' + esc(t) + "</option>").join("");
+    sel.value = sorted.includes(cur) ? cur : "";
+    sel.hidden = sorted.length === 0;
+    applyTagFilter();
+  }
+  function applyTagFilter() {
+    const sel = document.getElementById("tag-filter");
+    if (!sel) return;
+    const want = (sel.value || "").toLowerCase();
+    document.querySelectorAll("#recordings .card").forEach((c) => {
+      const tags = (c.getAttribute("data-tags") || "").toLowerCase().split(",").map((s) => s.trim());
+      c.style.display = !want || tags.includes(want) ? "" : "none";
+    });
   }
 
   // ---- ask the local AI ------------------------------------------------
@@ -890,10 +985,94 @@
     });
   }
 
+  // ---- transcript <-> audio sync (detail) -----------------------------
+  function setupTranscriptSync() {
+    const segs = document.getElementById("transcript-segments");
+    if (!segs) return;
+    const audio = document.querySelector("audio[data-audio-id]");
+    segs.querySelectorAll(".tseg-ts[data-seek]").forEach((b) => {
+      b.textContent = fmtClock(parseFloat(b.getAttribute("data-seek")) || 0);
+    });
+    segs.addEventListener("click", (e) => {
+      const b = e.target.closest(".tseg-ts");
+      if (!b || !audio) return;
+      audio.currentTime = parseFloat(b.getAttribute("data-seek")) || 0;
+      audio.play().catch(() => {});
+    });
+    if (audio) {
+      const rows = Array.from(segs.querySelectorAll(".tseg"));
+      audio.addEventListener("timeupdate", () => {
+        const t = audio.currentTime;
+        let active = null;
+        for (const r of rows) {
+          if (t >= (parseFloat(r.dataset.start) || 0) && t < (parseFloat(r.dataset.end) || 0)) { active = r; break; }
+        }
+        rows.forEach((r) => r.classList.toggle("active", r === active));
+      });
+    }
+  }
+
+  // ---- regenerate summary with a template (detail) --------------------
+  async function regenerate(btn) {
+    const sel = document.getElementById("tmpl-select");
+    const tmpl = sel ? sel.value : "general";
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = "Regenerating…";
+    const { ok, body } = await jsonFetch("/api/recordings/" + window.ALONARG_REC_ID + "/resummarize", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ template: tmpl }),
+    });
+    if (ok) { window.location.reload(); }
+    else { btn.disabled = false; btn.textContent = orig; toast((body && body.detail) || "Could not regenerate (is Ollama running?)"); }
+  }
+
+  // ---- pin toggle (detail) --------------------------------------------
+  async function togglePin(btn) {
+    const next = btn.getAttribute("data-pinned") !== "1";
+    btn.disabled = true;
+    const { ok } = await jsonFetch("/api/recordings/" + btn.getAttribute("data-id") + "/state", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: next }),
+    });
+    btn.disabled = false;
+    if (ok) { btn.setAttribute("data-pinned", next ? "1" : ""); toast(next ? "Pinned" : "Unpinned"); }
+    else toast("Could not update");
+  }
+
+  // ---- tags (detail) --------------------------------------------------
+  function renderTags() {
+    const box = document.getElementById("tags-box");
+    if (!box) return;
+    const tags = (window.ALONARG_STATE || {}).tags || [];
+    box.innerHTML = tags.length ? "" : '<span class="muted">No tags yet.</span>';
+    tags.forEach((t) => {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip";
+      chip.innerHTML = esc(t) + ' <button class="tag-x" type="button" title="Remove">×</button>';
+      chip.querySelector(".tag-x").addEventListener("click", () => saveTags(tags.filter((x) => x !== t)));
+      box.appendChild(chip);
+    });
+  }
+  async function saveTags(tags) {
+    const box = document.getElementById("tags-box");
+    const { ok, body } = await jsonFetch("/api/recordings/" + box.getAttribute("data-id") + "/state", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags: tags }),
+    });
+    if (ok) { window.ALONARG_STATE.tags = (body && body.tags) || tags; renderTags(); }
+    else toast("Could not save tags");
+  }
+  function addTag(name) {
+    name = (name || "").trim();
+    if (!name) return;
+    const tags = ((window.ALONARG_STATE || {}).tags || []).slice();
+    if (tags.some((t) => t.toLowerCase() === name.toLowerCase())) return;
+    tags.push(name);
+    saveTags(tags);
+  }
+
   // ---- wiring ---------------------------------------------------------
   document.addEventListener("click", (ev) => {
     const del = ev.target.closest(".delete-btn");
     if (del) { ev.preventDefault(); onDeleteClick(del); return; }
+    const pin = ev.target.closest(".card-pin");
+    if (pin) { ev.preventDefault(); ev.stopPropagation(); togglePin(pin); return; }
     // Clickable card: open the recording unless an interactive element was clicked.
     const card = ev.target.closest(".card[data-href]");
     if (card && !ev.target.closest("a, button, input, textarea")) {
@@ -909,6 +1088,8 @@
   // search (dashboard)
   const searchInput = document.getElementById("search-input");
   if (searchInput) searchInput.addEventListener("input", debounce(onSearch, 250));
+  const tagFilter = document.getElementById("tag-filter");
+  if (tagFilter) tagFilter.addEventListener("change", applyTagFilter);
 
   // meeting nudge banner
   const nudgeRecord = document.getElementById("nudge-record");
@@ -930,6 +1111,10 @@
   if (calConnect) calConnect.addEventListener("click", connectCalendar);
   const calDisconnect = document.getElementById("cal-disconnect");
   if (calDisconnect) calDisconnect.addEventListener("click", disconnectCalendar);
+
+  // tasks: open-only filter
+  const tasksOpenOnly = document.getElementById("tasks-open-only");
+  if (tasksOpenOnly) tasksOpenOnly.addEventListener("change", loadTasks);
 
   // settings: send test push
   const pushTestBtn = document.getElementById("push-test");
@@ -976,6 +1161,20 @@
   // email drafts on email-like action items + next steps (detail)
   setupEmailDrafts();
 
+  // transcript<->audio sync, regenerate, pin, tags (detail)
+  setupTranscriptSync();
+  const regenBtn = document.getElementById("regen-btn");
+  if (regenBtn) regenBtn.addEventListener("click", () => regenerate(regenBtn));
+  const pinBtn = document.getElementById("pin-btn");
+  if (pinBtn) pinBtn.addEventListener("click", () => togglePin(pinBtn));
+  const tagInput = document.getElementById("tag-input");
+  if (tagInput) {
+    renderTags();
+    tagInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); addTag(tagInput.value); tagInput.value = ""; }
+    });
+  }
+
   // edit notes + details sidebar (detail)
   const editNotesBtn = document.getElementById("edit-notes");
   if (editNotesBtn) editNotesBtn.addEventListener("click", startNotesEdit);
@@ -994,6 +1193,7 @@
     pollStatus();
     setInterval(pollStatus, STATUS_POLL_MS);
     if (anyActive()) startListPolling();
+    refreshTagFilter();
     pollNudge();
     setInterval(pollNudge, 20000);
 
