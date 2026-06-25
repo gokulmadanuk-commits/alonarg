@@ -367,6 +367,21 @@ def test_calendar_autorecord_toggle(tmp_db_path, tmp_path, monkeypatch):
     db.close()
 
 
+def test_people_endpoints(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: False)
+    monkeypatch.setattr(msgraph, "mail_available", lambda: False)
+    rid = db.create_recording(status="done", title="Sync")
+    db.set_meta(rid, {"contacts": [{"name": "Jai", "email": "jai@x.com", "phone": ""}], "people": []})
+    listing = client.get("/api/people").json()
+    assert any(p["email"] == "jai@x.com" for p in listing)
+    d = client.get("/api/people/detail", params={"id": "jai@x.com"}).json()
+    assert d["meeting_count"] == 1 and d["name"] == "Jai" and d["mail"] is False
+    assert client.get("/api/people/detail", params={"id": "ghost@x.com"}).status_code == 404
+    db.close()
+
+
 def test_system_info(tmp_db_path, tmp_path, monkeypatch):
     from alonarg import config, msgraph
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)

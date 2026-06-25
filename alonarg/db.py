@@ -51,6 +51,7 @@ _LIST_COLUMNS = (
     "system_path",
     "mixed_path",
     "summary_json",
+    "meta_json",
     "state_json",
 )
 
@@ -228,6 +229,7 @@ class Database:
         for row in rows:
             record = dict(row)
             record["summary"] = _loads_or_none(record.get("summary_json"))
+            record["meta"] = _loads_or_none(record.get("meta_json"))
             record["state"] = _loads_or_none(record.get("state_json"))
             result.append(record)
         return result
@@ -257,6 +259,7 @@ class Database:
         for row in rows:
             record = dict(row)
             record["summary"] = _loads_or_none(record.get("summary_json"))
+            record["meta"] = _loads_or_none(record.get("meta_json"))
             record["state"] = _loads_or_none(record.get("state_json"))
             result.append(record)
         return result
