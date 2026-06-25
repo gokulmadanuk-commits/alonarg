@@ -782,6 +782,17 @@ body {
 .series-link:hover { text-decoration: underline; }
 .side-list li .meta-date { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+/* ===== Pre-meeting briefs ===== */
+.briefs-mailnote { font-size: 13px; margin: 0 0 14px; }
+.brief-card { padding: 16px 20px; }
+.brief-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.brief-title { margin: 0; font-size: 16px; color: var(--text); }
+.brief-when { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.brief-gen { flex: 0 0 auto; }
+.brief-text { margin-top: 12px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+.brief-sub { margin-top: 10px; font-size: 12px; }
+.brief-empty { margin: 12px 0 0; }
+
 /* ===== Keyword trackers (settings) ===== */
 .tracker-add { display: flex; gap: 8px; margin: 6px 0 12px; }
 .trackers-list { display: flex; flex-direction: column; gap: 6px; }
