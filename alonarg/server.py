@@ -17,6 +17,7 @@ import mimetypes
 import shutil
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, UploadFile
@@ -31,6 +32,7 @@ from alonarg import (
     assistant,
     audio_capture,
     autorecord,
+    briefs,
     calendars,
     config,
     ingest,
@@ -240,6 +242,130 @@ def _enrich_recording(db, rec_id: int) -> None:
     subject = str(event.get("subject", "")).strip()
     if subject:
         db.update_recording(rec_id, title=subject)
+
+
+def build_brief(db, event: dict) -> dict:
+    """Compose a pre-meeting brief from the calendar invite, past meetings, and
+    recent emails with the attendees. Works even with no prior recordings.
+
+    Returns ``{"brief", "based_on", "emails_used", "mail_available"}``. Raises
+    ``RuntimeError`` if the local model is unreachable.
+    """
+    subject = str(event.get("subject", "") or "").strip()
+    organizer = str(event.get("organizer", "") or "").strip()
+    body = str(event.get("body", "") or "").strip()
+    names: list[str] = []
+    emails: list[str] = []
+    for a in event.get("attendees") or []:
+        if isinstance(a, dict):
+            nm = str(a.get("name", "") or "").strip()
+            em = str(a.get("email", "") or "").strip()
+        else:
+            nm, em = str(a).strip(), ""
+        if nm or em:
+            names.append(nm or em)
+        if em:
+            emails.append(em)
+
+    # Past recordings matching the subject or any attendee (optional).
+    seen: dict[int, dict] = {}
+    if subject:
+        for r in db.search_recordings(subject):
+            seen[r["id"]] = r
+    for nm in names:
+        if len(nm) >= 3:
+            for r in db.search_recordings(nm):
+                seen[r["id"]] = r
+    rows = sorted(seen.values(), key=lambda r: r.get("created_at", ""), reverse=True)[:5]
+    meeting_parts = []
+    for r in rows:
+        rec = db.get_recording(r["id"]) or r
+        summ = rec.get("summary") or {}
+        meeting_parts.append(
+            f"Meeting: {rec.get('title','')} ({rec.get('created_at','')})\n"
+            f"Summary: {summ.get('summary','')}\n"
+            f"Action items: {'; '.join(summ.get('action_items') or []) or 'none'}"
+        )
+
+    # Recent emails with the attendees (read-only; only if Mail.Read granted).
+    # Only touch Graph when the invite actually has attendee email addresses.
+    mail_ok = False
+    email_parts = []
+    if emails:
+        mail_ok = msgraph.mail_available()
+        if mail_ok:
+            seen_msgs: set = set()
+            msgs: list[dict] = []
+            for em in emails:
+                for m in msgraph.read_messages(em, top=5):
+                    k = (m["subject"], m["received"])
+                    if k not in seen_msgs:
+                        seen_msgs.add(k)
+                        msgs.append(m)
+            msgs.sort(key=lambda x: x["received"], reverse=True)
+            for m in msgs[:6]:
+                email_parts.append(
+                    f"Email ({(m['received'] or '')[:10]}) from {m['from']}: {m['subject']}\n{m['preview']}"
+                )
+
+    sections: list[str] = []
+    invite_lines = []
+    if organizer:
+        invite_lines.append(f"Organizer: {organizer}")
+    if names:
+        invite_lines.append("Attendees: " + ", ".join(names))
+    if body:
+        invite_lines.append("Invite notes: " + body[:1500])
+    if invite_lines:
+        sections.append("MEETING INVITE:\n" + "\n".join(invite_lines))
+    if meeting_parts:
+        sections.append("PAST MEETINGS:\n" + "\n\n".join(meeting_parts))
+    if email_parts:
+        sections.append("RECENT EMAILS:\n" + "\n\n".join(email_parts))
+
+    if not sections:
+        return {"brief": "", "based_on": 0, "emails_used": 0, "mail_available": mail_ok}
+    text = assistant.brief(subject, names, "\n\n".join(sections))
+    return {"brief": text, "based_on": len(rows), "emails_used": len(email_parts), "mail_available": mail_ok}
+
+
+def _pregen_briefs(app) -> None:
+    """Pre-generate briefs for approved meetings starting within ~48h (cheap cap)."""
+    db = app.state.db
+    try:
+        events = calendars.upcoming_events(7)
+    except Exception:  # noqa: BLE001 - calendar offline
+        return
+    approved = autorecord.approved_keys()
+    cached = briefs.all()
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(hours=48)
+    made = 0
+    for ev in events:
+        if made >= 2:  # bound work per cycle
+            break
+        key = autorecord.event_key(ev)
+        if key not in approved or (cached.get(key) or {}).get("brief"):
+            continue
+        try:
+            start = datetime.fromisoformat(ev.get("start", ""))
+        except (ValueError, TypeError):
+            continue
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if not (now <= start <= horizon):
+            continue
+        try:
+            result = build_brief(db, ev)
+        except Exception:  # noqa: BLE001 - model down etc.
+            continue
+        if result.get("brief"):
+            briefs.set(key, {
+                "subject": ev.get("subject", ""), "start": ev.get("start", ""),
+                "brief": result["brief"], "based_on": result["based_on"],
+                "emails_used": result["emails_used"], "generated_at": now.isoformat(),
+            })
+            made += 1
 
 
 def _begin_recording(app) -> int:
@@ -807,65 +933,77 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
 
     @app.post("/api/calendar/brief", dependencies=[Depends(require_auth)])
     def api_brief(
+        event: dict = Body(default=None),
         subject: str = Body(""),
         attendees: list[str] = Body(default=None),
         emails: list[str] = Body(default=None),
     ):
-        """A short pre-meeting brief from past meetings (and recent emails, if granted)."""
-        subject = (subject or "").strip()
-        attendees = attendees or []
-        emails = emails or []
+        """A pre-meeting brief from the calendar invite, past meetings, and recent emails.
 
-        # Past meetings matching the subject or any attendee.
-        seen: dict[int, dict] = {}
-        if subject:
-            for r in db.search_recordings(subject):
-                seen[r["id"]] = r
-        for a in attendees:
-            a = (a or "").strip()
-            if len(a) >= 3:
-                for r in db.search_recordings(a):
-                    seen[r["id"]] = r
-        rows = sorted(seen.values(), key=lambda r: r.get("created_at", ""), reverse=True)[:5]
-        meeting_parts = []
-        for r in rows:
-            rec = db.get_recording(r["id"]) or r
-            summ = rec.get("summary") or {}
-            meeting_parts.append(
-                f"Meeting: {rec.get('title', '')} ({rec.get('created_at', '')})\n"
-                f"Summary: {summ.get('summary', '')}\n"
-                f"Action items: {'; '.join(summ.get('action_items') or []) or 'none'}"
-            )
-
-        # Recent emails with the attendees (read-only; only if Mail.Read granted).
-        email_parts = []
-        if emails and msgraph.mail_available():
-            seen_msgs: set = set()
-            msgs: list[dict] = []
-            for em in emails:
-                for m in msgraph.read_messages(em, top=5):
-                    key = (m["subject"], m["received"])
-                    if key not in seen_msgs:
-                        seen_msgs.add(key)
-                        msgs.append(m)
-            msgs.sort(key=lambda x: x["received"], reverse=True)
-            for m in msgs[:6]:
-                email_parts.append(
-                    f"Email ({(m['received'] or '')[:10]}) from {m['from']}: {m['subject']}\n{m['preview']}"
-                )
-
-        if not meeting_parts and not email_parts:
-            return {"brief": "", "based_on": 0, "emails_used": 0}
-        context = ""
-        if meeting_parts:
-            context += "PAST MEETINGS:\n" + "\n\n".join(meeting_parts)
-        if email_parts:
-            context += ("\n\n" if context else "") + "RECENT EMAILS:\n" + "\n\n".join(email_parts)
+        Prefer passing the full ``event`` (subject/attendees/body). Falls back to
+        ``subject`` + ``attendees`` (names) + ``emails`` for older callers.
+        """
+        if not event:
+            att = [{"name": n, "email": ""} for n in (attendees or [])]
+            att += [{"name": "", "email": e} for e in (emails or [])]
+            event = {"subject": subject or "", "attendees": att}
         try:
-            text = assistant.brief(subject, attendees, context)
+            return build_brief(db, event)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
-        return {"brief": text, "based_on": len(rows), "emails_used": len(email_parts)}
+
+    # -- pre-meeting briefs (auto-generated for flagged meetings) ---------
+    @app.get("/api/briefs", dependencies=[Depends(require_auth)])
+    def api_list_briefs():
+        connected = msgraph.is_signed_in()
+        try:
+            events = calendars.upcoming_events(14)
+        except Exception:  # noqa: BLE001 - calendar offline/unavailable
+            events = []
+        approved = autorecord.approved_keys()
+        cached = briefs.all()
+        items = []
+        for ev in events:
+            key = autorecord.event_key(ev)
+            if key not in approved:
+                continue
+            c = cached.get(key) or {}
+            items.append({
+                "key": key,
+                "subject": ev.get("subject", ""),
+                "start": ev.get("start", ""),
+                "end": ev.get("end", ""),
+                "brief": c.get("brief", ""),
+                "generated_at": c.get("generated_at", ""),
+                "based_on": c.get("based_on", 0),
+                "emails_used": c.get("emails_used", 0),
+                "has_brief": bool(c.get("brief")),
+            })
+        items.sort(key=lambda x: x.get("start", ""))
+        return {"connected": connected, "mail": msgraph.mail_available(), "briefs": items}
+
+    @app.post("/api/briefs/generate", dependencies=[Depends(require_auth)])
+    def api_generate_brief(key: str = Body(..., embed=True)):
+        try:
+            events = calendars.upcoming_events(14)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=503, detail=f"Could not read the calendar: {exc}")
+        ev = next((e for e in events if autorecord.event_key(e) == key), None)
+        if ev is None:
+            raise HTTPException(status_code=404, detail="Meeting not found in your upcoming calendar")
+        try:
+            result = build_brief(db, ev)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        generated_at = datetime.now(timezone.utc).isoformat()
+        briefs.set(key, {
+            "subject": ev.get("subject", ""), "start": ev.get("start", ""),
+            "brief": result["brief"], "based_on": result["based_on"],
+            "emails_used": result["emails_used"], "generated_at": generated_at,
+        })
+        return {**result, "key": key, "generated_at": generated_at}
 
     # -- keyword trackers (across all meetings) --------------------------
     def _tracker_counts(terms: list[str]) -> list[dict]:
@@ -975,6 +1113,13 @@ def start_nudge_scheduler(app) -> threading.Thread:
                         )
                     except Exception:  # noqa: BLE001
                         log.warning("nudge push failed", exc_info=True)
+
+            # --- pre-generate briefs for soon, flagged meetings ---
+            try:
+                _pregen_briefs(app)
+            except Exception:  # noqa: BLE001
+                log.warning("brief pre-generation failed", exc_info=True)
+
             time.sleep(max(15, config.NUDGE_POLL_SECONDS))
 
     thread = threading.Thread(target=_loop, daemon=True, name="alonarg-nudge")

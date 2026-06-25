@@ -171,6 +171,51 @@ def test_pipeline_runs_enrich(tmp_path):
     db.close()
 
 
+def test_briefs_store(tmp_path, monkeypatch):
+    from alonarg import briefs, config
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    assert briefs.all() == {}
+    briefs.set("k1", {"brief": "hi", "generated_at": "t"})
+    assert briefs.get("k1")["brief"] == "hi"
+    briefs.set("k2", {"brief": "yo"})
+    briefs.prune(["k2"])
+    assert briefs.get("k1") is None and briefs.get("k2")["brief"] == "yo"
+
+
+def test_build_brief_from_invite_only(tmp_path, monkeypatch):
+    from alonarg import assistant, msgraph, server
+    db = Database(tmp_path / "b.db")
+    monkeypatch.setattr(msgraph, "mail_available", lambda: False)
+    captured = {}
+    monkeypatch.setattr(assistant, "brief", lambda subject, names, ctx, **k: captured.update(ctx=ctx) or "BRIEF")
+    ev = {
+        "subject": "Woodland sync", "organizer": "Gokul", "body": "Agenda: pricing review",
+        "attendees": [{"name": "Jai", "email": "jai@x.com"}],
+        "start": "2026-06-29T13:00:00+00:00",
+    }
+    res = server.build_brief(db, ev)  # no prior recordings at all
+    assert res["brief"] == "BRIEF" and res["based_on"] == 0 and res["emails_used"] == 0
+    assert "MEETING INVITE" in captured["ctx"]
+    assert "Agenda: pricing review" in captured["ctx"] and "Jai" in captured["ctx"]
+    db.close()
+
+
+def test_build_brief_with_emails(tmp_path, monkeypatch):
+    from alonarg import assistant, msgraph, server
+    db = Database(tmp_path / "b2.db")
+    monkeypatch.setattr(msgraph, "mail_available", lambda: True)
+    monkeypatch.setattr(msgraph, "read_messages", lambda addr, top=5: [
+        {"subject": "Re: pricing", "from": addr, "received": "2026-06-25T10:00:00Z", "preview": "the latest numbers"},
+    ])
+    captured = {}
+    monkeypatch.setattr(assistant, "brief", lambda s, n, ctx, **k: captured.update(ctx=ctx) or "OK")
+    ev = {"subject": "Catch up", "attendees": [{"name": "Jai", "email": "jai@x.com"}]}
+    res = server.build_brief(db, ev)
+    assert res["emails_used"] == 1 and res["mail_available"] is True
+    assert "RECENT EMAILS" in captured["ctx"] and "the latest numbers" in captured["ctx"]
+    db.close()
+
+
 def test_state_migration_adds_column(tmp_path):
     # Simulate an older DB without state_json, then reopen (migration adds it).
     import sqlite3

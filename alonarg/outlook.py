@@ -49,8 +49,10 @@ foreach ($it in $res) {
   $allday = $false; try { $allday = [bool]$it.AllDayEvent } catch {}
   $resp = 0; try { $resp = [int]$it.ResponseStatus } catch {}
   $id = ''; try { $id = [string]$it.GlobalAppointmentID } catch {}; if (-not $id) { try { $id = [string]$it.EntryID } catch {} }
+  $bd = ''; try { $bd = [string]$it.Body; if ($bd.Length -gt 800) { $bd = $bd.Substring(0, 800) } } catch {}
   $out += [pscustomobject]@{
     id        = $id
+    body      = $bd
     subject   = [string]$it.Subject
     start     = $it.Start.ToString('o')
     end       = $it.End.ToString('o')

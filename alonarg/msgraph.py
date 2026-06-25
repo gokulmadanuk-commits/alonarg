@@ -179,6 +179,7 @@ def _to_event(item: dict) -> dict:
         "allDay": bool(item.get("isAllDay")),
         "response": 4 if resp == "declined" else 0,
         "organizer": ((item.get("organizer") or {}).get("emailAddress") or {}).get("name", ""),
+        "body": (item.get("bodyPreview") or "").strip(),
     }
 
 
@@ -190,7 +191,7 @@ def read_events_window(start: datetime, end: datetime) -> list[dict]:
     params = {
         "startDateTime": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "endDateTime": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "$select": "id,subject,start,end,attendees,isAllDay,responseStatus,organizer",
+        "$select": "id,subject,start,end,attendees,isAllDay,responseStatus,organizer,bodyPreview",
         "$orderby": "start/dateTime",
         "$top": "50",
     }

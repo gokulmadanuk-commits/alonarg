@@ -465,6 +465,42 @@ def test_brief_no_history(tmp_db_path, tmp_path, monkeypatch):
     db.close()
 
 
+def test_briefs_list_and_generate(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import assistant, autorecord, calendars, config, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(msgraph, "is_signed_in", lambda: True)
+    monkeypatch.setattr(msgraph, "mail_available", lambda: False)
+    ev = {
+        "id": "e1", "subject": "Woodland sync",
+        "start": "2026-12-01T13:00:00+00:00", "end": "2026-12-01T13:30:00+00:00",
+        "attendees": [{"name": "Jai", "email": "jai@x.com"}], "organizer": "Gokul", "body": "agenda",
+    }
+    monkeypatch.setattr(calendars, "upcoming_events", lambda days=14: [dict(ev)])
+    autorecord.approve(ev)  # flag this meeting for recording
+
+    data = client.get("/api/briefs").json()
+    assert data["connected"] is True
+    assert len(data["briefs"]) == 1 and data["briefs"][0]["has_brief"] is False
+
+    monkeypatch.setattr(assistant, "brief", lambda *a, **k: "Generated brief")
+    g = client.post("/api/briefs/generate", json={"key": "e1"}).json()
+    assert g["brief"] == "Generated brief" and g["key"] == "e1"
+
+    data2 = client.get("/api/briefs").json()
+    assert data2["briefs"][0]["has_brief"] is True
+    assert data2["briefs"][0]["brief"] == "Generated brief"
+    db.close()
+
+
+def test_briefs_generate_unknown_key_404(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import calendars
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    monkeypatch.setattr(calendars, "upcoming_events", lambda days=14: [])
+    assert client.post("/api/briefs/generate", json={"key": "nope"}).status_code == 404
+    db.close()
+
+
 def test_brief_includes_emails(tmp_db_path, tmp_path, monkeypatch):
     from alonarg import assistant, msgraph
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
