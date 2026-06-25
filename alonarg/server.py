@@ -330,7 +330,7 @@ def build_brief(db, event: dict) -> dict:
 
 
 def _pregen_briefs(app) -> None:
-    """Pre-generate briefs for approved meetings starting within ~48h (cheap cap)."""
+    """Pre-generate briefs for approved meetings starting within the next week."""
     db = app.state.db
     try:
         events = calendars.upcoming_events(7)
@@ -339,7 +339,7 @@ def _pregen_briefs(app) -> None:
     approved = autorecord.approved_keys()
     cached = briefs.all()
     now = datetime.now(timezone.utc)
-    horizon = now + timedelta(hours=48)
+    horizon = now + timedelta(days=7)
     made = 0
     for ev in events:
         if made >= 2:  # bound work per cycle

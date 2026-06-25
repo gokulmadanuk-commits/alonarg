@@ -372,5 +372,20 @@ body {
   color: var(--record-hover);
 }
 
+/* ---------------- briefs ---------------- */
+.brief-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow-card); }
+.brief-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.brief-title { margin: 0; font-size: 15px; color: var(--text); word-break: break-word; }
+.brief-when { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.brief-gen { flex: 0 0 auto; padding: 8px 12px; }
+.brief-text { margin-top: 12px; color: var(--text); line-height: 1.6; white-space: pre-wrap; font-size: 14px; }
+.brief-sub { margin-top: 10px; font-size: 12px; }
+.brief-empty { margin: 12px 0 0; }
+
 /* ---------------- tab svg icons ---------------- */
 .tab-ico svg { display: block; }
+.tab-txt { white-space: nowrap; }
+.tab { padding-left: 2px; padding-right: 2px; }
+@media (max-width: 430px) {
+  .tab-txt { font-size: 10px; }
+}

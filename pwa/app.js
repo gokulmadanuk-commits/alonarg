@@ -912,7 +912,7 @@ async function doAsk() {
 let currentTab = 'record';
 
 function showView(view) {
-  const views = ['record', 'recordings', 'detail', 'calendar', 'ask', 'settings'];
+  const views = ['record', 'recordings', 'detail', 'calendar', 'briefs', 'ask', 'settings'];
   for (const v of views) {
     const el = document.getElementById('view-' + v);
     if (el) el.hidden = v !== view;
@@ -936,10 +936,113 @@ function switchTab(tab) {
     pollLaptopStatus();
   } else if (tab === 'calendar') {
     loadCalendar();
+  } else if (tab === 'briefs') {
+    loadBriefsView();
   } else if (tab === 'ask') {
     const i = $('#ask-input');
     if (i) i.focus();
   }
+}
+
+/* =====================================================================
+ * Pre-meeting briefs
+ * ===================================================================== */
+function fmtBriefWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadBriefsView() {
+  const list = $('#briefs-list');
+  if (!list) return;
+  const { configured } = getConfig();
+  if (!configured) {
+    list.innerHTML = '<div class="empty-state">Set your laptop\'s backend URL in Settings first.</div>';
+    return;
+  }
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  let data;
+  try {
+    const resp = await apiFetch('/api/briefs');
+    if (!resp.ok) throw new Error('status ' + resp.status);
+    data = await resp.json();
+  } catch (_) {
+    list.innerHTML = '<div class="empty-state">Couldn\'t reach your laptop. Check the connection.</div>';
+    return;
+  }
+  if (!data || !data.connected) {
+    list.innerHTML = '<div class="empty-state">Calendar not connected. Connect it from the desktop app.</div>';
+    return;
+  }
+  renderBriefsView(data.briefs || []);
+}
+
+function renderBriefsView(items) {
+  const list = $('#briefs-list');
+  if (!items.length) {
+    list.innerHTML = '<div class="empty-state">No meetings flagged for recording. Turn on Auto-record for a meeting in the Calendar tab and its brief will appear here.</div>';
+    return;
+  }
+  list.innerHTML = items.map((it) => {
+    const sources = [];
+    if (it.based_on) sources.push(it.based_on + ' past meeting' + (it.based_on !== 1 ? 's' : ''));
+    if (it.emails_used) sources.push(it.emails_used + ' email' + (it.emails_used !== 1 ? 's' : ''));
+    const sub = (it.generated_at ? 'Prepared ' + fmtBriefWhen(it.generated_at) : 'Not prepared yet') +
+      (sources.length ? ' · from ' + sources.join(' + ') : '');
+    return (
+      '<div class="brief-card" data-key="' + escapeHtml(it.key) + '">' +
+      '<div class="brief-head">' +
+      '<div style="min-width:0"><h3 class="brief-title">' + escapeHtml(it.subject || '(no title)') + '</h3>' +
+      '<div class="brief-when">' + escapeHtml(fmtBriefWhen(it.start)) + '</div></div>' +
+      '<button class="btn brief-gen" type="button">' + (it.has_brief ? 'Refresh' : 'Prepare') + '</button>' +
+      '</div>' +
+      (it.has_brief
+        ? '<div class="brief-text">' + escapeHtml(it.brief) + '</div><div class="brief-sub muted">' + escapeHtml(sub) + '</div>'
+        : '<p class="muted brief-empty">No brief yet — tap “Prepare”.</p>') +
+      '</div>'
+    );
+  }).join('');
+}
+
+async function generateBriefView(key, btn) {
+  const card = btn.closest('.brief-card');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Preparing…';
+  try {
+    const resp = await apiFetch('/api/briefs/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.brief) {
+      const sources = [];
+      if (data.based_on) sources.push(data.based_on + ' past meeting' + (data.based_on !== 1 ? 's' : ''));
+      if (data.emails_used) sources.push(data.emails_used + ' email' + (data.emails_used !== 1 ? 's' : ''));
+      const empty = card.querySelector('.brief-empty');
+      if (empty) empty.remove();
+      let textEl = card.querySelector('.brief-text');
+      if (!textEl) { textEl = document.createElement('div'); textEl.className = 'brief-text'; card.appendChild(textEl); }
+      textEl.textContent = data.brief;
+      let subEl = card.querySelector('.brief-sub');
+      if (!subEl) { subEl = document.createElement('div'); subEl.className = 'brief-sub muted'; card.appendChild(subEl); }
+      subEl.textContent = 'Prepared just now' + (sources.length ? ' · from ' + sources.join(' + ') : '');
+      btn.textContent = 'Refresh';
+    } else if (resp.ok) {
+      toast('Not enough info to brief this meeting yet.');
+      btn.textContent = orig;
+    } else {
+      toast('Could not prepare the brief.');
+      btn.textContent = orig;
+    }
+  } catch (_) {
+    toast('Could not reach your laptop.');
+    btn.textContent = orig;
+  }
+  btn.disabled = false;
 }
 
 /* =====================================================================
@@ -1174,6 +1277,15 @@ function init() {
   $('#ask-btn').addEventListener('click', doAsk);
   $('#ask-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); doAsk(); }
+  });
+
+  // Briefs
+  $('#briefs-refresh').addEventListener('click', loadBriefsView);
+  $('#briefs-list').addEventListener('click', (e) => {
+    const b = e.target.closest('.brief-gen');
+    if (!b) return;
+    const card = b.closest('.brief-card');
+    if (card) generateBriefView(card.dataset.key, b);
   });
 
   // Connection pill -> jump to settings

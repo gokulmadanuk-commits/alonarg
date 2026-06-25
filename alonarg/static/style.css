@@ -526,8 +526,10 @@ body {
 .view-title { font-size: 18px; margin: 0; color: var(--text); }
 .content-main { width: 100%; max-width: 920px; margin: 0 auto; padding: 24px 28px 64px; }
 .content-main.detail { max-width: 1100px; }
-/* Calendar uses the full available width (no centered cap). */
-.content-main.cal-wide { max-width: none; }
+/* Calendar uses the full available width (no centered cap), and its grid is
+   sized to the viewport — so trim the bottom padding so the page itself doesn't
+   scroll (only the calendar grid scrolls when it doesn't fit). */
+.content-main.cal-wide { max-width: none; padding-bottom: 8px; overflow: hidden; }
 .view-sub { margin: 0 0 18px; max-width: 640px; }
 
 /* ===== Calendar week time-grid (Outlook-style) ===== */
