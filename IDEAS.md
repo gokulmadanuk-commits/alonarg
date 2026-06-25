@@ -38,6 +38,8 @@ Everything here runs on my laptop with the local model (no API costs).
   counts and click-through to search.
 - **Pre-meeting brief** — in the calendar popover, "Brief me" writes a recap from past
   meetings on that subject/people (incl. still-open action items), using the local model.
+  Also pulls **recent emails** with the attendees (read-only Microsoft Graph `Mail.Read`)
+  when granted; degrades to meetings-only otherwise.
 
 ## 🔨 In progress
 - (nothing right now)
