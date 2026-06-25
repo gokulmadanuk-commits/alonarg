@@ -87,6 +87,43 @@ def test_coaching_metrics():
     assert analytics.coaching_metrics([]) == {}
 
 
+# ---- msgraph mail reads ---------------------------------------------------
+def test_mail_available(monkeypatch):
+    from alonarg import msgraph
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: "tok")
+    assert msgraph.mail_available() is True
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: None)
+    assert msgraph.mail_available() is False
+
+
+def test_read_messages(monkeypatch):
+    import httpx
+    from alonarg import msgraph
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: "tok")
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"value": [
+                {"subject": "Re: Quote", "from": {"emailAddress": {"address": "jai@x.com"}},
+                 "receivedDateTime": "2026-06-20T10:00:00Z", "bodyPreview": "older"},
+                {"subject": "Hi", "from": {"emailAddress": {"address": "jai@x.com"}},
+                 "receivedDateTime": "2026-06-25T10:00:00Z", "bodyPreview": "newer"},
+            ]}
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp())
+    msgs = msgraph.read_messages("jai@x.com")
+    assert len(msgs) == 2
+    assert msgs[0]["received"].startswith("2026-06-25") and msgs[0]["subject"] == "Hi"  # newest first
+
+
+def test_read_messages_no_token(monkeypatch):
+    from alonarg import msgraph
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: None)
+    assert msgraph.read_messages("x@y.com") == []
+    assert msgraph.read_messages("") == []
+
+
 # ---- trackers module ------------------------------------------------------
 def test_trackers_module(tmp_path, monkeypatch):
     from alonarg import config, trackers

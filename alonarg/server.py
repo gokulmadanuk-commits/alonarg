@@ -746,10 +746,12 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
     # -- Microsoft Graph calendar (new Outlook / M365) -------------------
     @app.get("/api/graph/status", dependencies=[Depends(require_auth)])
     def graph_status():
+        signed_in = msgraph.is_signed_in()
         return {
-            "signed_in": msgraph.is_signed_in(),
+            "signed_in": signed_in,
             "account": msgraph.account_name(),
             "pending": msgraph.login_pending(),
+            "mail": msgraph.mail_available() if signed_in else False,
         }
 
     @app.post("/api/graph/login", dependencies=[Depends(require_auth)])
@@ -804,10 +806,17 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
         return {"ok": True, "enabled": enabled, "key": autorecord.event_key(event)}
 
     @app.post("/api/calendar/brief", dependencies=[Depends(require_auth)])
-    def api_brief(subject: str = Body(""), attendees: list[str] = Body(default=None)):
-        """A short pre-meeting brief from past meetings on this subject/people."""
+    def api_brief(
+        subject: str = Body(""),
+        attendees: list[str] = Body(default=None),
+        emails: list[str] = Body(default=None),
+    ):
+        """A short pre-meeting brief from past meetings (and recent emails, if granted)."""
         subject = (subject or "").strip()
         attendees = attendees or []
+        emails = emails or []
+
+        # Past meetings matching the subject or any attendee.
         seen: dict[int, dict] = {}
         if subject:
             for r in db.search_recordings(subject):
@@ -818,22 +827,45 @@ def create_app(db=None, recorder=None, run_pipeline=None, run_ingest=None) -> Fa
                 for r in db.search_recordings(a):
                     seen[r["id"]] = r
         rows = sorted(seen.values(), key=lambda r: r.get("created_at", ""), reverse=True)[:5]
-        if not rows:
-            return {"brief": "", "based_on": 0}
-        parts = []
+        meeting_parts = []
         for r in rows:
             rec = db.get_recording(r["id"]) or r
             summ = rec.get("summary") or {}
-            parts.append(
+            meeting_parts.append(
                 f"Meeting: {rec.get('title', '')} ({rec.get('created_at', '')})\n"
                 f"Summary: {summ.get('summary', '')}\n"
                 f"Action items: {'; '.join(summ.get('action_items') or []) or 'none'}"
             )
+
+        # Recent emails with the attendees (read-only; only if Mail.Read granted).
+        email_parts = []
+        if emails and msgraph.mail_available():
+            seen_msgs: set = set()
+            msgs: list[dict] = []
+            for em in emails:
+                for m in msgraph.read_messages(em, top=5):
+                    key = (m["subject"], m["received"])
+                    if key not in seen_msgs:
+                        seen_msgs.add(key)
+                        msgs.append(m)
+            msgs.sort(key=lambda x: x["received"], reverse=True)
+            for m in msgs[:6]:
+                email_parts.append(
+                    f"Email ({(m['received'] or '')[:10]}) from {m['from']}: {m['subject']}\n{m['preview']}"
+                )
+
+        if not meeting_parts and not email_parts:
+            return {"brief": "", "based_on": 0, "emails_used": 0}
+        context = ""
+        if meeting_parts:
+            context += "PAST MEETINGS:\n" + "\n\n".join(meeting_parts)
+        if email_parts:
+            context += ("\n\n" if context else "") + "RECENT EMAILS:\n" + "\n\n".join(email_parts)
         try:
-            text = assistant.brief(subject, attendees, "\n\n".join(parts))
+            text = assistant.brief(subject, attendees, context)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
-        return {"brief": text, "based_on": len(rows)}
+        return {"brief": text, "based_on": len(rows), "emails_used": len(email_parts)}
 
     # -- keyword trackers (across all meetings) --------------------------
     def _tracker_counts(terms: list[str]) -> list[dict]:

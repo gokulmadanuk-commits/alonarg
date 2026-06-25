@@ -152,7 +152,11 @@
       const { ok, body } = await jsonFetch("/api/graph/status");
       if (!ok || !body) return;
       if (body.signed_in) {
-        statusEl.textContent = "Connected" + (body.account ? " — " + body.account : "");
+        let html = "Connected" + (body.account ? " — " + esc(body.account) : "");
+        html += body.mail
+          ? ' · <span class="ok-note">email on</span>'
+          : ' · <span class="warn-note">email off — Disconnect &amp; reconnect to use emails in briefs</span>';
+        statusEl.innerHTML = html;
         connectBtn.hidden = true;
         disconnectBtn.hidden = false;
         const login = document.getElementById("cal-login");
@@ -537,9 +541,10 @@
     out.hidden = false;
     out.textContent = "Thinking…";
     const attendees = (ev.attendees || []).map((a) => a.name || a.email).filter(Boolean);
+    const emails = (ev.attendees || []).map((a) => a.email).filter(Boolean);
     const { ok, body } = await jsonFetch("/api/calendar/brief", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: ev.subject || "", attendees: attendees }),
+      body: JSON.stringify({ subject: ev.subject || "", attendees: attendees, emails: emails }),
     });
     btn.disabled = false;
     if (ok && body) {

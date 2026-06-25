@@ -42,12 +42,12 @@ def test_to_event_declined_and_z_suffix():
 
 
 def test_read_events_window_not_signed_in(monkeypatch):
-    monkeypatch.setattr(msgraph, "get_token", lambda: None)
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: None)
     assert msgraph.read_events_window(datetime.now(timezone.utc), datetime.now(timezone.utc)) == []
 
 
 def test_read_events_window_parses(monkeypatch):
-    monkeypatch.setattr(msgraph, "get_token", lambda: "tok")
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: "tok")
 
     class _R:
         status_code = 200
@@ -66,7 +66,7 @@ def test_read_events_window_parses(monkeypatch):
 
 
 def test_read_events_window_error(monkeypatch):
-    monkeypatch.setattr(msgraph, "get_token", lambda: "tok")
+    monkeypatch.setattr(msgraph, "get_token", lambda scopes=None: "tok")
 
     class _R:
         status_code = 403

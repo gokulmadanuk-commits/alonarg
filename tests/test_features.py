@@ -294,6 +294,7 @@ def test_graph_status(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     r = client.get("/api/graph/status")
     assert r.status_code == 200 and r.json()["signed_in"] is False
+    assert r.json()["mail"] is False  # not signed in -> no mail
     db.close()
 
 
@@ -461,6 +462,41 @@ def test_brief_no_history(tmp_db_path, tmp_path, monkeypatch):
     client, db = _client(tmp_db_path, tmp_path, monkeypatch)
     r = client.post("/api/calendar/brief", json={"subject": "Brand new meeting zzz", "attendees": []})
     assert r.status_code == 200 and r.json()["based_on"] == 0
+    db.close()
+
+
+def test_brief_includes_emails(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import assistant, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    _seed(db)
+    monkeypatch.setattr(msgraph, "mail_available", lambda: True)
+    monkeypatch.setattr(msgraph, "read_messages", lambda addr, top=5: [
+        {"subject": "Quote", "from": addr, "received": "2026-06-25T10:00:00Z", "preview": "the quote is ready"},
+    ])
+    captured = {}
+    monkeypatch.setattr(assistant, "brief", lambda subject, attendees, ctx, **k: captured.update(ctx=ctx) or "ok")
+    r = client.post("/api/calendar/brief", json={
+        "subject": "Pricing discussion", "attendees": ["Jai"], "emails": ["jai@x.com"],
+    })
+    assert r.status_code == 200
+    assert r.json()["emails_used"] >= 1
+    assert "RECENT EMAILS" in captured["ctx"] and "the quote is ready" in captured["ctx"]
+    db.close()
+
+
+def test_brief_skips_email_when_not_granted(tmp_db_path, tmp_path, monkeypatch):
+    from alonarg import assistant, msgraph
+    client, db = _client(tmp_db_path, tmp_path, monkeypatch)
+    _seed(db)
+    called = {"read": False}
+    monkeypatch.setattr(msgraph, "mail_available", lambda: False)
+    monkeypatch.setattr(msgraph, "read_messages", lambda *a, **k: called.update(read=True) or [])
+    monkeypatch.setattr(assistant, "brief", lambda *a, **k: "ok")
+    r = client.post("/api/calendar/brief", json={
+        "subject": "Pricing discussion", "attendees": ["Jai"], "emails": ["jai@x.com"],
+    })
+    assert r.status_code == 200 and r.json()["emails_used"] == 0
+    assert called["read"] is False  # never reads mail without consent
     db.close()
 
 

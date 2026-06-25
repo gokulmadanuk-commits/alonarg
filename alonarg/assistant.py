@@ -81,11 +81,11 @@ def ask(question: str, context_text: str, **kw) -> str:
 def brief(subject: str, attendees: list[str], context_text: str, **kw) -> str:
     """Write a short pre-meeting brief grounded in the user's past meetings."""
     system = (
-        "You write a concise pre-meeting brief from the user's PAST meetings. In "
-        "3-5 sentences remind them what was discussed last time with these people "
-        "or on this topic, any decisions made, and then explicitly list any OPEN "
-        "action items they still owe. Use ONLY the provided history; if little is "
-        "known, say so briefly. No preamble, no headings."
+        "You write a concise pre-meeting brief from the user's PAST meetings and "
+        "RECENT EMAILS. In 3-5 sentences remind them what was discussed last time "
+        "with these people or on this topic, anything still outstanding from recent "
+        "emails, and then explicitly list any OPEN action items they owe. Use ONLY "
+        "the provided history; if little is known, say so briefly. No preamble, no headings."
     )
     user = (
         f"Upcoming meeting: {subject or '(untitled)'}\n"

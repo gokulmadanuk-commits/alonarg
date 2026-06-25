@@ -17,7 +17,12 @@ import httpx
 from alonarg import config
 
 GRAPH = "https://graph.microsoft.com/v1.0"
-SCOPES = ["Calendars.Read"]
+# Requested at login (device-code consent). Mail is read-only and only used to
+# enrich pre-meeting briefs. Calendar and mail tokens are acquired per-scope so
+# that calendar keeps working even if mail consent hasn't been granted yet.
+CAL_SCOPES = ["Calendars.Read"]
+MAIL_SCOPES = ["Mail.Read"]
+SCOPES = CAL_SCOPES + MAIL_SCOPES
 
 _lock = threading.Lock()
 _app = None
@@ -79,17 +84,29 @@ def login_pending() -> bool:
     return _flow is not None
 
 
-def get_token() -> str | None:
-    """Return a valid access token from the cache (refreshing silently), or None."""
+def get_token(scopes: list[str] | None = None) -> str | None:
+    """Return a valid access token for ``scopes`` from the cache, or None.
+
+    Per-scope so calendar (Calendars.Read) keeps working even when mail
+    (Mail.Read) hasn't been consented yet — that read simply returns None.
+    """
     app = _get_app()
     accts = app.get_accounts()
     if not accts:
         return None
-    result = app.acquire_token_silent(SCOPES, account=accts[0])
+    result = app.acquire_token_silent(scopes or CAL_SCOPES, account=accts[0])
     _save_cache()
     if result and "access_token" in result:
         return result["access_token"]
     return None
+
+
+def mail_available() -> bool:
+    """True if we hold a usable Mail.Read token (i.e. email reads will work)."""
+    try:
+        return bool(get_token(MAIL_SCOPES))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def start_device_login() -> dict:
@@ -167,7 +184,7 @@ def _to_event(item: dict) -> dict:
 
 def read_events_window(start: datetime, end: datetime) -> list[dict]:
     """Return calendar events overlapping [start, end]. Empty list if not signed in."""
-    token = get_token()
+    token = get_token(CAL_SCOPES)
     if not token:
         return []
     params = {
@@ -185,3 +202,39 @@ def read_events_window(start: datetime, end: datetime) -> list[dict]:
     if resp.status_code != 200:
         raise RuntimeError(f"Microsoft Graph error {resp.status_code}: {resp.text[:200]}")
     return [_to_event(it) for it in (resp.json().get("value") or [])]
+
+
+def read_messages(address: str, top: int = 5) -> list[dict]:
+    """Recent emails involving ``address`` (from/to/cc), newest first.
+
+    Returns ``[{subject, from, received, preview}]``. Empty if Mail.Read isn't
+    granted or anything goes wrong (best-effort enrichment only).
+    """
+    address = (address or "").strip()
+    if not address:
+        return []
+    token = get_token(MAIL_SCOPES)
+    if not token:
+        return []
+    params = {
+        "$search": f'"{address}"',
+        "$select": "subject,from,toRecipients,receivedDateTime,bodyPreview",
+        "$top": str(max(1, min(top, 25))),
+    }
+    headers = {"Authorization": "Bearer " + token, "ConsistencyLevel": "eventual"}
+    try:
+        resp = httpx.get(GRAPH + "/me/messages", params=params, headers=headers, timeout=20)
+    except httpx.HTTPError:
+        return []
+    if resp.status_code != 200:
+        return []
+    out = []
+    for m in resp.json().get("value") or []:
+        out.append({
+            "subject": m.get("subject", "") or "(no subject)",
+            "from": ((m.get("from") or {}).get("emailAddress") or {}).get("address", ""),
+            "received": m.get("receivedDateTime", ""),
+            "preview": (m.get("bodyPreview", "") or "")[:400],
+        })
+    out.sort(key=lambda x: x["received"], reverse=True)
+    return out

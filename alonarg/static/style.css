@@ -428,6 +428,8 @@ body {
   line-height: 1.6;
 }
 .cal-login a { color: var(--accent); word-break: break-all; }
+.ok-note { color: var(--accent); font-weight: 600; }
+.warn-note { color: var(--text-muted); }
 .side-block { margin-top: 14px; }
 .side-block h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
 .side-list { list-style: none; margin: 0; padding: 0; }
