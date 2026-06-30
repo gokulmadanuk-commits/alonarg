@@ -59,3 +59,26 @@ def test_decide_never_stops_manual_recording(data_dir):
     # active_key None means the user started it manually -> never auto-stop
     assert autorecord.decide(None, recording=True, active_key=None) == "none"
     assert autorecord.decide({"id": "e1"}, recording=True, active_key=None) == "none"
+
+
+def test_decide_no_restart_for_already_recorded_event(data_dir):
+    # The reported bug: we auto-recorded e1, the user stopped it early, but the
+    # calendar invite is still "in progress". Once e1 is in recorded_keys we
+    # must not auto-restart it (which previously looped every poll).
+    autorecord.approve({"id": "e1", "subject": "S", "start": "x", "end": "y"})
+    ev = {"id": "e1", "subject": "S", "start": "x", "end": "y"}
+    assert autorecord.decide(ev, recording=False, active_key=None) == "start"
+    assert (
+        autorecord.decide(ev, recording=False, active_key=None, recorded_keys={"e1"})
+        == "none"
+    )
+
+
+def test_decide_still_starts_different_approved_event(data_dir):
+    # Having recorded e1 must not block a genuinely different approved meeting.
+    autorecord.approve({"id": "e2", "subject": "S2", "start": "x", "end": "y"})
+    ev2 = {"id": "e2", "subject": "S2", "start": "x", "end": "y"}
+    assert (
+        autorecord.decide(ev2, recording=False, active_key=None, recorded_keys={"e1"})
+        == "start"
+    )

@@ -1246,6 +1246,10 @@ def start_nudge_scheduler(app) -> threading.Thread:
 
     def _loop():
         nudged: set = set()
+        # Event keys we've already auto-recorded this session. Once an event is
+        # here we never auto-restart it, so stopping a recording early (while the
+        # calendar invite is still "in progress") won't re-record every minute.
+        recorded: set = set()
         while True:
             try:
                 event = calendars.find_current_event()
@@ -1262,13 +1266,15 @@ def start_nudge_scheduler(app) -> threading.Thread:
 
             # --- auto-record approved meetings ---
             try:
-                action = autorecord.decide(event, recording, active_key)
+                action = autorecord.decide(event, recording, active_key, recorded)
             except Exception:  # noqa: BLE001
                 action = "none"
             if action == "start":
                 try:
                     _begin_recording(app)
-                    app.state.autorecord_active_key = autorecord.event_key(event)
+                    key = autorecord.event_key(event)
+                    app.state.autorecord_active_key = key
+                    recorded.add(key)
                     recording = True
                     subject = event.get("subject", "Meeting")
                     push.send_to_all("Recording started", f"Auto-recording “{subject}”.", "/")
